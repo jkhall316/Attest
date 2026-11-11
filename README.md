@@ -660,4 +660,4 @@ Keep logic out of `src/index.js`, keep pure helpers pure (they are the tested su
 
 ## License / no warranty
 
-No license file is included; this is a private giveaway repo, not a package. Use it, fork it, deploy it. There is no warranty of any kind, and you are responsible for your own Cloudflare bill, AI provider bill, and any data you put through it.
+[MIT](LICENSE). Use it, fork it, deploy it; keep the copyright notice and license text in copies and forks, and a link back is appreciated. There is no warranty of any kind, and you are responsible for your own Cloudflare bill, AI provider bill, and any data you put through it.
