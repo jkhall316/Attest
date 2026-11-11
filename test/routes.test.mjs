@@ -13,7 +13,7 @@ import { encodeWav } from '../src/testing.js';
 // rather than hard-coded in the fake. Any SELECT/UPDATE/DELETE against an owned table
 // whose WHERE lacks `owner = ?` is recorded in `violations` -- tests assert it stays empty.
 // Anything it does not understand throws, so unsupported SQL is loud, not silently empty.
-const OWNED = new Set(['recordings', 'chats', 'people', 'voiceprints', 'custom_templates', 'briefs', 'facts']);
+const OWNED = new Set(['recordings', 'chats', 'people', 'voiceprints', 'custom_templates', 'briefs', 'brief_acks', 'facts']);
 
 function splitTop(str, isSep) {
   const parts = []; let depth = 0, inStr = false, cur = '';
@@ -68,7 +68,7 @@ function fakeEnv({
   audio = {},
 } = {}) {
   const store = {
-    recordings, chats, chat_messages: messages, people, voiceprints, custom_templates: templates, settings: [], briefs: [], facts,
+    recordings, chats, chat_messages: messages, people, voiceprints, custom_templates: templates, settings: [], briefs: [], brief_acks: [], facts,
   };
   const violations = [];
   const toBuf = (v) => (typeof v === 'string' ? new TextEncoder().encode(v) : v instanceof Uint8Array ? v : new Uint8Array(v));
@@ -83,7 +83,7 @@ function fakeEnv({
     if (op === 'CREATE') return { rows: [], changes: 0 };
 
     if (op === 'INSERT') {
-      const m = sql.match(/INSERT INTO (\w+)\s*\(([^)]*)\)\s*VALUES\s*\(([\s\S]*?)\)\s*(?:ON CONFLICT|$)/i);
+      const m = sql.match(/INSERT (?:OR IGNORE )?INTO (\w+)\s*\(([^)]*)\)\s*VALUES\s*\(([\s\S]*?)\)\s*(?:ON CONFLICT|$)/i);
       const table = m[1];
       if (table === 'transcript_fts') return { rows: [], changes: 1 };
       const cols = m[2].split(',').map((c) => c.trim());
@@ -853,6 +853,17 @@ test('GET /api/today lists open items (overdue, slipping), skips done and other 
   assert.equal(out.week_start, '2026-11-09');
   assert.equal(out.brief, null);
   assert.deepEqual(out.people.map((p) => [p.id, p.name]), [['p1', 'Ben']]);
+  assert.deepEqual(violations, []);
+});
+
+test('POST/DELETE /api/today/ack hides a brief item until restored', async () => {
+  const { env, violations } = fakeEnv({ recordings: todayRecs() });
+  const post = (b) => call('/api/today/ack', { method: 'POST', body: JSON.stringify(b) }, env);
+  assert.equal((await post({})).status, 400);
+  assert.equal((await post({ key: 'send the deck' })).status, 200);
+  assert.deepEqual((await (await call('/api/today?date=2026-11-10', {}, env)).json()).acks, ['send the deck']);
+  assert.equal((await call('/api/today/ack', { method: 'DELETE' }, env)).status, 200);
+  assert.deepEqual((await (await call('/api/today?date=2026-11-10', {}, env)).json()).acks, []);
   assert.deepEqual(violations, []);
 });
 

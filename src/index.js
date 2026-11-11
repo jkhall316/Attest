@@ -25,7 +25,7 @@ import {
   liveStart, liveChunk, liveAudio, livePart, liveRecover,
 } from './routes/recordings.js';
 import { listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
-import { today, brief, insight } from './routes/today.js';
+import { today, brief, ackBrief, insight } from './routes/today.js';
 import { backfill, listMemory, patchFact, deleteFact } from './routes/memory.js';
 import { vectorsEnabled } from './vectors.js';
 import { withLocalBackends } from './local.js';
@@ -107,6 +107,7 @@ export default {
 
       if (pathname === '/api/today' && m === 'GET') return today(request, env, owner);
       if (pathname === '/api/today/brief' && m === 'POST') return brief(request, env, owner);
+      if (pathname === '/api/today/ack' && (m === 'POST' || m === 'DELETE')) return ackBrief(request, env, owner);
       if (pathname === '/api/insight' && m === 'POST') return insight(request, env, owner);
 
       if (pathname === '/api/memory' && m === 'GET') return listMemory(request, env, owner);

@@ -89,7 +89,21 @@ export async function today(request, env, owner) {
     weekly: decorate(await cachedBrief(env, owner, 'weekly', wk)),
     has_recordings: rows.length > 0,
     people,
+    acks: ((await env.DB.prepare('SELECT key FROM brief_acks WHERE owner = ?').bind(owner).all()).results || []).map((r) => r.key),
   });
+}
+
+// POST /api/today/ack {key}: hide one brief item. DELETE /api/today/ack: bring them all back.
+export async function ackBrief(request, env, owner) {
+  if (request.method === 'DELETE') {
+    await env.DB.prepare('DELETE FROM brief_acks WHERE owner = ?').bind(owner).run();
+    return json({ ok: true });
+  }
+  const body = await request.json().catch(() => null);
+  const key = typeof body?.key === 'string' ? body.key.trim().slice(0, 300) : '';
+  if (!key) return fail('key required');
+  await env.DB.prepare('INSERT OR IGNORE INTO brief_acks (owner, key, created_at) VALUES (?,?,?)').bind(owner, key, Date.now()).run();
+  return json({ ok: true });
 }
 
 // POST /api/today/brief {kind:'today'|'weekly', date, me?, force?}: generate (or return the

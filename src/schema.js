@@ -61,6 +61,10 @@ export const MIGRATIONS = [
     'CREATE TABLE IF NOT EXISTS process_timings ( id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, stage TEXT NOT NULL, key TEXT NOT NULL DEFAULT \'\', audio_ms INTEGER NOT NULL, work_ms INTEGER NOT NULL, at INTEGER NOT NULL )',
     'CREATE INDEX IF NOT EXISTS process_timings_lookup ON process_timings (owner, stage, key, at DESC)',
   ] },
+  // Brief items the owner has acknowledged on Today; hidden from the daily brief and weekly review.
+  { id: 8, sql: [
+    'CREATE TABLE IF NOT EXISTS brief_acks ( owner TEXT NOT NULL, key TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (owner, key) )',
+  ] },
 ];
 
 // Applies every migration not yet recorded. `db` is a D1 binding (or anything with the

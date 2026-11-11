@@ -12,6 +12,7 @@ import { startChat } from './chats.js';
 import { icon } from './icons.js';
 import { noteHtml } from './recordings.js';
 
+let acks = new Set(); // brief items the owner has acknowledged (hidden), keyed by normalized text
 let token = 0; // bumps on every showToday(), so a slow response cannot paint over a newer screen
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -49,6 +50,53 @@ function itemRow(x) {
       <span class="meta">${who}${due}${age}<a href="#" class="open-rec" title="${esc(x.title)}">${esc(x.title)}</a></span></span></label>`;
 }
 
+const ackKey = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().slice(0, 200);
+
+// Adds a ✓ to every bullet in a brief card and hides the ones already acknowledged.
+function decorateBrief(id) {
+  const card = $(id);
+  if (!card) return;
+  let hidden = 0;
+  for (const li of card.querySelectorAll('li')) {
+    const key = ackKey(li.textContent || '');
+    if (!key) continue;
+    if (acks.has(key)) {
+      const ul = li.parentElement;
+      li.remove(); hidden++;
+      if (ul && !ul.children.length) ul.remove();
+      continue;
+    }
+    li.insertAdjacentHTML('afterbegin', `<button class="ack" data-key="${esc(key)}" title="Acknowledge: hide this item" aria-label="Acknowledge">✓</button>`);
+  }
+  if (hidden) card.insertAdjacentHTML('beforeend', `<div class="muted ack-note">${hidden} acknowledged item${hidden === 1 ? '' : 's'} hidden · <a href="#" class="ack-restore">Show all</a></div>`);
+}
+
+function wireAcks(id) {
+  const card = $(id);
+  if (!card) return;
+  card.onclick = async (e) => {
+    const restore = e.target.closest('.ack-restore');
+    if (restore) {
+      e.preventDefault();
+      try { await api('/today/ack', { method: 'DELETE' }); } catch (err) { return alert(err.message); }
+      acks = new Set(); return showToday();
+    }
+    const btn = e.target.closest('.ack');
+    if (!btn) return;
+    const key = btn.dataset.key;
+    try { await post('/today/ack', { key }); } catch (err) { return alert(err.message); }
+    acks.add(key);
+    for (const c of ['brief-card', 'weekly-card']) {
+      const el = $(c);
+      if (!el) continue;
+      for (const b of el.querySelectorAll('.ack')) if (b.dataset.key === key) {
+        const li = b.closest('li'); const ul = li?.parentElement;
+        li?.remove(); if (ul && !ul.children.length) ul.remove();
+      }
+    }
+  };
+}
+
 function briefHtml(b, emptyMsg) {
   if (!b) return `<div class="muted">${esc(emptyMsg)}</div>`;
   return `${noteHtml(b.content)}
@@ -75,6 +123,7 @@ export async function showToday(opts) {
       `<button class="chipbtn" data-id="${p.id}" title="${esc(p.prompt)}">${esc(p.label.replace('{person}', 'a person'))}</button>`).join('')}</div>`).join('');
   const autoNotes = PROMPTS.filter((p) => p.auto).map((p) => `<li><b>${esc(p.label)}.</b> ${esc(p.auto)}</li>`).join('');
 
+  acks = new Set(d.acks || []);
   openData = d.open;
   const me = getMe();
   const mineCount = me ? d.open.filter((x) => isMe(x.owner, me)).length : 0;
@@ -125,6 +174,7 @@ export async function showToday(opts) {
     <details style="margin-top:22px"><summary class="muted">What runs on its own</summary><ul class="muted">${autoNotes}</ul></details>`;
 
   wire(d, mine, date);
+  for (const id of ['brief-card', 'weekly-card']) { wireAcks(id); decorateBrief(id); }
   renderOpenItems();
   loadPeople(mine);
   loadMemory(mine);
@@ -197,7 +247,7 @@ async function generate(kind, date, mine, force = false) {
   card.innerHTML = '<div class="muted">Generating…</div>';
   try {
     const b = await post('/today/brief', { kind, date, me: getMe(), force });
-    if (mine === token) card.innerHTML = briefHtml(b, 'Nothing to show.');
+    if (mine === token) { card.innerHTML = briefHtml(b, 'Nothing to show.'); decorateBrief(card.id || (kind === 'today' ? 'brief-card' : 'weekly-card')); }
   } catch (e) {
     if (mine === token) card.innerHTML = `<div class="muted">Could not generate: ${esc(e.message)}</div>`;
   }

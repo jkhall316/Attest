@@ -52,7 +52,7 @@ test('a failing migration rolls back whole and is not recorded', async () => {
   const bad = [...MIGRATIONS, { id: 99, sql: ['ALTER TABLE recordings ADD COLUMN ok1 TEXT', 'NOT SQL'] }];
   await assert.rejects(() => runMigrations(db, bad));
   assert.ok(!db.raw.prepare('PRAGMA table_info(recordings)').all().some((c) => c.name === 'ok1'));
-  assert.deepEqual(db.raw.prepare('SELECT id FROM schema_migrations').all().map((r) => r.id), [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(db.raw.prepare('SELECT id FROM schema_migrations').all().map((r) => r.id), [1, 2, 3, 4, 5, 6, 7, 8]);
 });
 
 test('migration 4 adds recordings.unanswered and the briefs table', async () => {

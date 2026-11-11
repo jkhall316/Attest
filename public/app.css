@@ -295,3 +295,8 @@ dialog textarea, dialog input:not([type=checkbox]), dialog select { width:100% }
   .cmdbtn { min-width:0 } .persona .who { display:none }
 }
 @media (prefers-reduced-motion:reduce) { button.rec.on, button.rec.on::before { animation:none; transition:none } }
+
+.md li:has(> .ack) { list-style:none; margin-left:-1.2em }
+button.ack { padding:0 6px; margin-right:8px; font-size:11px; line-height:1.6; border-radius:6px; color:var(--text-muted); background:transparent }
+button.ack:hover { color:var(--ok); border-color:var(--ok) }
+.ack-note { margin-top:10px; font-size:12px }
