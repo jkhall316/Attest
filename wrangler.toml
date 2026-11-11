@@ -30,8 +30,8 @@ binding = "AUDIO"
 crons = ["*/15 * * * *"]
 
 [vars]
-# AI provider. Default is OpenAI with the OPENAI_API_KEY secret (nothing to set here).
-# `npm run setup` asks OpenAI vs OpenRouter and stores the settings below as Worker
+# AI provider. `npm run setup` defaults to OpenRouter (recommended); with nothing set, the app itself falls
+# back to OpenAI and the OPENAI_API_KEY secret. `npm run setup` asks which, and stores the settings below as Worker
 # SECRETS, so this file stays as is. To set them by hand, use `wrangler secret put NAME`
 # (or uncomment here, but not both: a var and a secret of the same name conflict).
 #

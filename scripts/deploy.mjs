@@ -68,7 +68,7 @@ the automatic login setup, complete Zero Trust onboarding (Free plan). See the R
   const PROVIDER_VARS = ['LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODELS', 'DEFAULT_MODEL', 'STT_BASE_URL', 'STT_API_KEY', 'STT_MODELS'];
   let provider = '';
   while (!['openai', 'openrouter'].includes(provider)) {
-    provider = (await ask('AI provider: "openai" or "openrouter"', { def: 'openai' })).toLowerCase();
+    provider = (await ask('AI provider: "openrouter" (recommended) or "openai"', { def: 'openrouter' })).toLowerCase();
   }
   const secrets = { OWNER_EMAIL: email };
   const remove = [];

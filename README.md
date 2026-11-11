@@ -99,7 +99,7 @@ npx wrangler login   # opens your browser to sign in to Cloudflare
 npm run deploy       # a wizard asks for your hostname, email and API key
 ```
 
-When the wizard asks for a provider, answer `openrouter` and accept the defaults (`openai/gpt-oss-20b` for chat, `microsoft/mai-transcribe-2` for transcription). That is [the recommended route](#the-recommended-route). Then open your hostname, sign in with the emailed code, and record something short.
+When the wizard asks for a provider, press Enter (the default is `openrouter`) and accept the defaults (`openai/gpt-oss-20b` for chat, `microsoft/mai-transcribe-2` for transcription). That is [the recommended route](#the-recommended-route). Then open your hostname, sign in with the emailed code, and record something short.
 
 ### Route B: This Mac only
 
@@ -171,7 +171,7 @@ With no `wrangler.local.toml` yet, `npm run deploy` asks:
 |---|---|
 | Hostname (`attest.example.com`) | Written to `wrangler.local.toml` (gitignored) as the Worker's custom domain |
 | Your email | `OWNER_EMAIL` secret, and the address allowed through Access |
-| AI provider (`openai` or `openrouter`) | OpenAI: asks for `OPENAI_API_KEY`. OpenRouter: asks for one OpenRouter key plus the chat and transcription model ids, and sets `LLM_*`, `STT_*` and `DEFAULT_MODEL` as secrets. Re-run `npm run setup` to switch. |
+| AI provider (`openrouter`, the default, or `openai`) | OpenRouter: asks for one OpenRouter key plus the chat and transcription model ids, and sets `LLM_*`, `STT_*` and `DEFAULT_MODEL` as secrets. OpenAI: asks for `OPENAI_API_KEY`. Re-run `npm run setup` to switch. |
 | Pocket API key | `POCKET_API_KEY` secret, optional. You can also add or change it later in **Settings** (the gear icon) |
 | Create the Access login automatically? | If yes: asks for account id and the [step 3](#3-optional-api-token) token |
 
@@ -197,7 +197,7 @@ Only if you skipped the automatic login.
 4. Under **Access policies** create a policy: **Action = Allow**, **Include, then Emails**, your email (exactly `OWNER_EMAIL`). Everyone you allow sees the same recordings (the app is [single-user](#privacy-and-security)). Access is deny-by-default, so anyone not matching an Allow policy is blocked.
 5. Enable **One-time PIN** as the login method. Leave "Apply instant authentication" off unless exactly one provider is enabled.
 6. Set a **Session Duration** (for example 1 month) and choose **Create**.
-7. If you skipped the wizard's secrets: `npx wrangler secret put OPENAI_API_KEY`, `OWNER_EMAIL`, and optionally `POCKET_API_KEY`.
+7. If you skipped the wizard's secrets: the provider secrets (see [Providers and keys](#providers-and-keys); for OpenAI, `npx wrangler secret put OPENAI_API_KEY`), `npx wrangler secret put OWNER_EMAIL`, and optionally `POCKET_API_KEY`.
 
 Dashboard labels move around; if one differs, look for the same idea nearby. Docs: [developers.cloudflare.com/cloudflare-one](https://developers.cloudflare.com/cloudflare-one/). Something not working? See [Troubleshooting](#troubleshooting).
 
@@ -356,14 +356,14 @@ Everything is bring-your-own: there is no Attest-run service. Set secrets with `
 - **About $0.10 per recorded hour** all in: MAI-Transcribe 2 is $0.10 per audio hour, and `gpt-oss-20b` ($0.03 / $0.13 per million tokens in/out) adds about a tenth of a cent for the summary, mind maps, speaker naming and memory facts. See the [route comparison](#compare-routes).
 - **Speaker labels included**, so naming, [voice recognition](#speakers-and-voices), talk balance and the Today prompts all work.
 - **Big files**: MAI takes up to 300 MB / 2 hours per file, and Attest streams large uploads (up to 48 MB) straight from R2.
-- **It is the wizard's default** (`npm run setup`, answer `openrouter`, press Enter at the model questions), and the first choice in [Settings](#settings).
+- **It is the wizard's default** (`npm run setup`, press Enter at the provider and model questions), and the first choice in [Settings](#settings).
 - **Live preview stays cheap**: on OpenRouter the preview always uses plain Whisper (about $0.012 per audio hour), not MAI.
 
 Upgrade the chat model whenever you want better writing: `anthropic/claude-haiku-5.5` costs about a third of a cent more per hour, and `openai/gpt-5-mini` about a cent more.
 
 ### OpenAI
 
-**OpenAI** gives you summaries, mind maps, ask, speaker naming and `gpt-4o-transcribe-diarize` for speaker labels, all on one key. It is the default if you answer `openai` in the wizard, and costs about **$0.36 per recorded hour** on `gpt-6-luna`. That diarize model is deprecated and cut off on 2027-02-26; see [Known limits](#known-limits-honestly).
+**OpenAI** gives you summaries, mind maps, ask, speaker naming and `gpt-4o-transcribe-diarize` for speaker labels, all on one key. Choose it by answering `openai` in the wizard. It costs about **$0.36 per recorded hour** on `gpt-6-luna`. That diarize model is deprecated and cut off on 2027-02-26; see [Known limits](#known-limits-honestly).
 
 ### OpenRouter
 
@@ -493,7 +493,7 @@ Sorted roughly by cost. "Needs" is the API key you must hold. Speaker labels are
 | OpenRouter: `voxtral-mini` + `gpt-oss-20b` | OpenRouter key | yes | $0.21 | $8.44 |
 | OpenRouter: `scribe-v2` + `claude-haiku-5.5` | OpenRouter key | yes | $0.22 | $8.94 |
 | OpenAI: `gpt-transcribe` + `gpt-6-luna` | OpenAI API key | no | $0.27 | $10.94 |
-| OpenAI: `gpt-4o-transcribe-diarize` + `gpt-6-luna` (OpenAI default) | OpenAI API key | yes (until 2027-02-26) | $0.36 | $14.54 |
+| OpenAI: `gpt-4o-transcribe-diarize` + `gpt-6-luna` (OpenAI route default) | OpenAI API key | yes (until 2027-02-26) | $0.36 | $14.54 |
 | OpenAI: `gpt-4o-transcribe-diarize` + `gpt-6.1-terra` | OpenAI API key | yes (until 2027-02-26) | $0.40 | $15.80 |
 | OpenAI: `gpt-4o-transcribe-diarize` + `gpt-6-astra` | OpenAI API key | yes (until 2027-02-26) | $0.71 | $28.40 |
 | [Local Mac with oMLX](#run-it-locally-on-a-mac-omlx) | none | yes, detected by voice in your browser | $0 in API fees | $0 |
@@ -530,7 +530,7 @@ Chat (summaries, mind maps, naming, memory, Ask, Today), at the 25k in / 2k out 
 | `deepseek/deepseek-v4-flash` | OpenRouter | $0.09 / $0.18 | $0.003 |
 | `anthropic/claude-haiku-5.5` | OpenRouter | $0.10 / $0.50 | $0.004 |
 | `openai/gpt-5-mini` | OpenRouter | $0.25 / $2.00 | $0.010 |
-| `gpt-6-luna` (OpenAI default) | OpenAI | $0.10 / $0.50 | $0.004 |
+| `gpt-6-luna` (OpenAI route default) | OpenAI | $0.10 / $0.50 | $0.004 |
 | `gpt-6.1-terra` | OpenAI | $1.00 / $5.00 | $0.035 |
 | `gpt-6.1-sol` | OpenAI | $2.00 / $10.00 | $0.07 |
 | `gpt-6-astra` | OpenAI | $10.00 / $50.00 | $0.35 |
