@@ -15,17 +15,16 @@ Attest is a private, self-hosted voice notebook. Run it on **your own Mac** (wit
 
 ## Why Attest
 
-Most AI note-takers are a subscription, run on someone else's servers, and forget everything the moment the meeting ends. Attest is built around the opposite ideas.
+Most AI note-takers are a monthly subscription, keep your conversations on someone else's servers, and forget everything the moment the meeting ends. Attest is built the other way round.
 
-- **It is yours.** One Cloudflare Worker, one D1 database, one R2 bucket, all in your account. No Attest-run server, no accounts, no plans, no usage caps, nothing phoning home. See [Privacy and security](#privacy-and-security).
-- **It is cheap and you can see the cost.** You pay your AI provider directly. On the [recommended route](#the-recommended-route) (OpenRouter, `gpt-oss-20b`, `mai-transcribe-2`) a recorded hour costs about **$0.10, speaker labels included**; the OpenAI route is about $0.36. Every recording shows its own token count, and there is a [route-by-route comparison](#compare-routes). Prefer zero API fees? See [running locally on a Mac](#run-it-locally-on-a-mac-omlx).
-- **It knows who said what, and never guesses.** Speaker names are only accepted when a verbatim quote from the transcript proves them. Enrolled voices are recognised on **any** provider by a voice model that runs in your browser, so your audio never leaves it. A match is only ever a suggestion until you confirm it. See [Speakers and voices](#speakers-and-voices).
-- **It remembers.** Every recording adds durable facts (promises, decisions, preferences, relationships) to a structured memory, each backed by a quote, plus a semantic index of everything said. Asking "what did Ben promise me?" is a lookup, not a re-read of 50 transcripts. See [Memory and semantic search](#memory-and-semantic-search).
-- **It runs your day.** The [Today screen](#the-today-screen) gives you a daily brief, a weekly review, your open and overdue action items, and ten one-click prompts: prep me for a person, what did I promise, decisions log, coach me, and more.
-- **It is not locked to a vendor.** OpenAI or OpenRouter, switchable from a settings dialog with no redeploy. See [Providers and keys](#providers-and-keys).
-- **It is small and readable.** Plain ES modules with no build step on the front, about thirty small, focused files on the back, and 160 tests. See [For developers](#for-developers).
+- **Your conversations stay yours.** Run it on your own Mac, where nothing leaves the machine, or in your own Cloudflare account. There is no Attest company server, no sign-up, no plan and no usage limit. See [Privacy and security](#privacy-and-security).
+- **It costs pennies, and you can see exactly what.** No subscription: you pay your AI provider directly, about **$0.10 for an hour of recording**, speakers included. Or pay nothing at all by [running it on your Mac](#run-it-locally-on-a-mac-omlx). Every recording shows what it used. See the [cost comparison](#compare-routes).
+- **It knows who said what, and never guesses.** Teach it a voice once and it recognises that person in later recordings. It only puts a name on someone when the transcript proves it, and a voice match stays a suggestion until you confirm it. Your audio is never sent anywhere to do this. See [Speakers and voices](#speakers-and-voices).
+- **It remembers, so you don't have to.** Every promise, decision and preference from every conversation is kept with the quote behind it. "What did Ben promise me?" gets an answer in seconds, with the source, instead of an hour of re-reading notes. See [Memory and semantic search](#memory-and-semantic-search).
+- **It plans your day.** Open Attest and Today shows what you owe people, what is waiting on you and what is overdue, with a daily brief and a weekly review that write themselves. Ten one-click prompts cover the rest: prep me for a person, what did I promise, coach me, and more. See [the Today screen](#the-today-screen).
+- **No lock-in.** Use OpenRouter or OpenAI, or a model on your own Mac, and switch whenever you like without redeploying anything. See [Providers and keys](#providers-and-keys).
 
-> This is not a hosted product. You deploy it to your own Cloudflare account. There is no server run by anyone else, and nothing leaves your Worker except calls to the AI provider you chose.
+> Attest is not a hosted service. You run it yourself, so no one else operates a server that holds your recordings. The only thing that ever leaves your setup is what you send to the AI provider you chose, and with a model on your Mac, not even that.
 
 ## A day with Attest
 
