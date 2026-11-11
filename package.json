@@ -1,0 +1,17 @@
+{
+  "name": "attest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "node scripts/deploy.mjs",
+    "setup": "node scripts/deploy.mjs --setup",
+    "test": "node --test test/",
+    "local": "wrangler dev --var REQUIRE_ACCESS:false",
+    "setup:local": "node scripts/local-setup.mjs",
+    "local:check": "node scripts/local-check.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  }
+}

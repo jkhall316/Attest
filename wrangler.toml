@@ -1,0 +1,69 @@
+# A Worker's name is its identity in Cloudflare, and its D1 database and R2 bucket are found by it: do not change
+# it after your first deploy (a new name deploys an empty copy beside your data).
+name = "attest"
+main = "src/index.js"
+compatibility_date = "2025-09-23"
+assets = { directory = "public" }
+
+# Lockdown: no public workers.dev / preview URLs; reachable only on a custom domain that
+# sits behind Cloudflare Access. Your own hostname goes in wrangler.local.toml (gitignored,
+# see wrangler.local.toml.example); `npm run deploy` merges it in.
+workers_dev = false
+preview_urls = false
+
+[[d1_databases]]
+binding = "DB"
+# No ids: `wrangler deploy` creates the database and bucket on first deploy and finds them again after.
+# Tables are created automatically on first request (src/schema.js).
+
+[[r2_buckets]]
+binding = "AUDIO"
+
+# Semantic search bindings (AI + a Vectorize index named attest-memory) are NOT listed here on
+# purpose: a binding to a missing index makes `wrangler deploy` fail. `npm run deploy` creates
+# the index and appends them to the merged config (see README, "Semantic search"). Without
+# them Ask uses keyword search.
+
+# Free-plan friendly: Cron Triggers cost nothing. Every 15 min the Worker pulls new
+# Pocket recordings and processes them (no-op unless POCKET_API_KEY is set).
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+# AI provider. Default is OpenAI with the OPENAI_API_KEY secret (nothing to set here).
+# `npm run setup` asks OpenAI vs OpenRouter and stores the settings below as Worker
+# SECRETS, so this file stays as is. To set them by hand, use `wrangler secret put NAME`
+# (or uncomment here, but not both: a var and a secret of the same name conflict).
+#
+# OpenRouter example (one key covers chat + transcription; no speaker labels):
+# LLM_BASE_URL = "https://openrouter.ai/api/v1"
+# LLM_MODELS   = "openai/gpt-oss-20b,deepseek/deepseek-v4-flash,anthropic/claude-haiku-5.5,openai/gpt-5-mini"
+# DEFAULT_MODEL = "openai/gpt-oss-20b"
+# STT_BASE_URL = "https://openrouter.ai/api/v1"
+# STT_MODELS   = "openai/whisper-large-v3-turbo,openai/whisper-large-v3"
+# (secrets: LLM_API_KEY, STT_API_KEY = your OpenRouter key)
+#
+# OpenAI example (the default; shown for reference):
+# LLM_BASE_URL = "https://api.openai.com/v1"
+# LLM_MODELS   = "gpt-6-luna,gpt-6.1-terra,gpt-6.1-sol,gpt-6-astra"
+# STT_BASE_URL = "https://api.openai.com/v1"
+# STT_MODELS   = "gpt-4o-transcribe-diarize,gpt-transcribe"
+# Behind Cloudflare Access, set this so a request without the Access header is a 401
+# instead of the shared `local` owner. Also set `workers_dev = false` above the bindings.
+REQUIRE_ACCESS = "true"
+# Cron has no Access header, so name the owner whose rows the background import
+# should land under: the same email you sign in with via Access. Default: "local".
+# OWNER_EMAIL: set as a secret, not here (keeps your email out of git):
+#   npx wrangler secret put OWNER_EMAIL
+
+# Secrets (set with `wrangler secret put`, never commit):
+#   OPENAI_API_KEY          required with OpenAI (chat + transcription)
+#   LLM_API_KEY, STT_API_KEY  keys for LLM_BASE_URL / STT_BASE_URL (OpenRouter); fall back to OPENAI_API_KEY
+#   POCKET_API_KEY          optional, enables "Import from Pocket"
+# Placeholders for planned features (nothing in src/ reads these yet):
+#   RESEND_API_KEY, DIGEST_FROM                      daily digest email (#9)
+#   LINEAR_API_KEY, TODOIST_API_TOKEN, NOTION_TOKEN  action-item push (#10)
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+#   MS_CLIENT_ID, MS_CLIENT_SECRET                   Drive / OneDrive export (#11)
+# Auth: put Cloudflare Access in front of this Worker. It injects
+# cf-access-authenticated-user-email, which we use as the row owner.

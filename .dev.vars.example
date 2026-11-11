@@ -1,0 +1,43 @@
+# Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
+
+# Default route: OpenRouter + gpt-oss-20b + mai-transcribe-2. One OpenRouter key covers summaries,
+# Ask, speaker naming and transcription (see README "The recommended route").
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODELS=openai/gpt-oss-20b
+DEFAULT_MODEL=openai/gpt-oss-20b
+STT_BASE_URL=https://openrouter.ai/api/v1
+STT_API_KEY=sk-or-...
+STT_MODELS=microsoft/mai-transcribe-2
+
+# Or OpenAI instead: comment out the OpenRouter block above and use just this one key.
+# OPENAI_API_KEY=sk-...
+
+# Fully local on a Mac (oMLX): easiest is `npm run setup:local`, which tests your server and
+# writes these for you. By hand:
+# LOCAL_MODE=true
+# REQUIRE_ACCESS=false
+# LLM_BASE_URL=http://localhost:8000/v1
+# LLM_API_KEY=your-omlx-key
+# LLM_MODELS=mlx-community/gpt-oss-20b-MXFP4-Q8
+# DEFAULT_MODEL=mlx-community/gpt-oss-20b-MXFP4-Q8
+# LLM_CONTEXT_CHARS=98000                    # ~3 characters per token of your model's context window
+# EMBED_MODEL=mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ   # semantic search (optional)
+# STT_BASE_URL=http://localhost:8000/v1
+# STT_API_KEY=your-omlx-key
+# STT_MODELS=mlx-community/whisper-large-v3-turbo-asr-fp16
+# LOCAL_DIARIZE=true                         # detect speakers in the browser by voice
+
+# Optional: Pocket API key (pk_...) for "Import from Pocket".
+# POCKET_API_KEY=pk_...
+
+# Planned features -- placeholders only, nothing reads these yet.
+# RESEND_API_KEY=re_...
+# DIGEST_FROM=notes@your-verified-domain.example
+# LINEAR_API_KEY=lin_api_...
+# TODOIST_API_TOKEN=...
+# NOTION_TOKEN=secret_...
+# GOOGLE_CLIENT_ID=...
+# GOOGLE_CLIENT_SECRET=...
+# MS_CLIENT_ID=...
+# MS_CLIENT_SECRET=...

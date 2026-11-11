@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attest</title>
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.18"></script>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <h1 id="brand" title="Back to Today">ATTEST</h1>
+  <button id="cmdk" class="cmdbtn" title="Search, jump or ask (Cmd/Ctrl+K)" aria-label="Open command palette"><span style="display:flex;align-items:center;gap:8px"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>Search or ask</span><kbd>⌘K</kbd></button>
+  <span class="sp"></span>
+  <button id="export-all" class="ghost small" title="Bulk export every summary as Markdown">Export all</button>
+  <button id="export-zip" class="ghost small" title="Every recording as a .docx, in one zip">Export .zip</button>
+  <button id="persona" class="persona" aria-haspopup="true" aria-expanded="false" title="Who “I” and “me” mean in your briefs and prompts">
+    <span class="av" id="persona-av">?</span><span class="who"><small>Speaking as</small><span id="persona-name">Set who you are</span></span>
+    <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+  <button id="settings" class="icon ghost" title="Settings" aria-label="Settings">&#9881;</button>
+</header>
+<div id="persona-pop" class="popover" hidden role="dialog" aria-label="Speaking as"></div>
+
+<div class="wrap">
+  <aside>
+    <nav class="aside-nav" aria-label="Main">
+      <button id="home" class="navbtn">Today <span id="badge" class="pill error"></span></button>
+      <button id="nav-ask" class="navbtn">Ask &amp; chats</button>
+    </nav>
+    <div class="aside-body">
+      <div class="rec-block">
+        <button class="rec primary" id="rec">● Record</button>
+        <div class="rec-sub">
+          <label class="btnlike">Upload audio<input type="file" id="file" accept="audio/*" hidden></label>
+          <button id="pocket" class="small" title="Pull new recordings from your Pocket account and process them">Import from Pocket</button>
+        </div>
+        <div class="muted" id="pocket-status" style="text-align:center;font-size:12px"></div>
+        <div class="muted" id="timer" style="text-align:center"></div>
+        <div class="muted" id="live" style="font-size:12px;white-space:pre-wrap"></div>
+      </div>
+      <details class="opts" id="opts">
+        <summary><span class="opts-pills" id="opts-pills"></span><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+        <div class="opts-body stack">
+          <input id="title" placeholder="Title (optional)">
+          <div class="row" style="flex-wrap:nowrap">
+            <select id="template" style="flex:0 0 38%" title="Summary style"></select>
+            <select id="model" style="flex:1" title="Summary model"></select>
+          </div>
+          <select id="transcriber" title="Transcription model"></select>
+        </div>
+      </details>
+      <div id="transcriber-note"></div>
+      <div class="group-title" style="margin-top:22px">Recordings <span id="count" style="font-weight:400"></span></div>
+      <div id="list" style="margin-top:-6px"></div>
+    </div>
+  </aside>
+
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+
+<dialog id="tpl-dialog">
+  <form method="dialog" class="stack" style="width:min(400px,86vw);padding:18px 20px">
+    <strong>New custom template</strong>
+    <input id="tpl-label" placeholder="Label (e.g. Court hearing)">
+    <textarea id="tpl-style" rows="3" placeholder="What should the summary contain?"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button value="cancel">Cancel</button>
+      <button class="primary" id="tpl-save" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settings-dialog">
+  <div class="dlg">
+    <header>Settings</header>
+    <div class="dlg-body">
+      <label class="muted" style="display:block">AI provider
+        <select id="set-provider" style="margin-top:4px">
+          <option value="openai">OpenAI (speaker labels + voiceprints)</option>
+          <option value="openrouter">OpenRouter (cheapest; one key; speaker labels with some models)</option>
+        </select></label>
+      <div class="muted" id="set-custom"></div>
+      <div id="set-body"></div>
+    </div>
+    <footer>
+      <span class="muted" id="set-status" style="min-height:18px"></span>
+      <button id="set-close" type="button">Close</button>
+      <button id="set-save" class="primary" type="button">Save</button>
+    </footer>
+  </div>
+</dialog>
+
+<script type="module" src="/app/main.js"></script>
+</body>
+</html>

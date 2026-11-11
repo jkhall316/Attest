@@ -1,0 +1,3 @@
+# Copy to wrangler.local.toml (gitignored) and set your own hostname. Top-level keys
+# only; `npm run deploy` prepends this file to wrangler.toml.
+routes = [{ pattern = "attest.example.com", custom_domain = true }]

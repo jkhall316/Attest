@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dev.vars
+.workflow-*.js
+wrangler.local.toml
+.wrangler.merged.toml
+.env
+.env.*
+!.env.example
+.DS_Store
+.claude/
