@@ -124,12 +124,13 @@ export function buildContext(rows, { since, person, deep = false, question = '' 
   return { text, sources: picked.map(({ id, title }) => ({ id, title })) };
 }
 
-export function insightSystem({ today, me, personNotes }) {
+export function insightSystem({ today, me, personNotes, handled }) {
   return [
     'You are a sharp chief of staff for one person. You help them run their day, their business and their working relationships, using ONLY the recordings below.',
     `Today is ${today}.`,
     me ? `The user is ${me}. Where they ask about "I", "me" or "my", that is ${me}.` : 'Do not assume which speaker is the user unless the text makes it obvious.',
     personNotes ? `Notes the user keeps about this person: ${personNotes}` : '',
+    handled?.length ? `The user has already acknowledged these items, so do not list them again unless the recordings show something new about them:\n${handled.map((h) => `- ${h}`).join('\n')}` : '',
     'Be concise and concrete: lead with the answer, use short bullets, name people, dates and recording titles (e.g. "Weekly sync, Nov 10").',
     'For any claim about how a person behaves or communicates, give a brief quote as evidence. Advice about people is opinion resting on limited evidence; say so when it is thin.',
     'If the recordings do not contain the answer, say so plainly. Never invent facts, tasks, dates or quotes.',

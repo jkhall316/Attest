@@ -11,6 +11,13 @@ import {
 
 const MAX_PROMPT = 1500;
 const MAX_NAME = 80;
+export const ACK_TTL = 7 * DAY; // acknowledged brief items come back (if still true) after a week
+
+// Drops expired acknowledgements and returns the live ones, newest first.
+async function liveAcks(env, owner) {
+  await env.DB.prepare('DELETE FROM brief_acks WHERE owner = ? AND created_at < ?').bind(owner, Date.now() - ACK_TTL).run();
+  return ((await env.DB.prepare('SELECT key FROM brief_acks WHERE owner = ? ORDER BY created_at DESC LIMIT 40').bind(owner).all()).results || []).map((r) => r.key);
+}
 
 // Ready recordings, newest first, with the JSON columns parsed.
 async function readyRows(env, owner, limit = 200) {
@@ -41,7 +48,7 @@ async function cachedBrief(env, owner, kind, period) {
 
 // The shared engine: a time window of the owner's recordings + one instruction -> markdown.
 // No recordings in the window means no model call (and nothing to cache).
-export async function runInsight(env, owner, { prompt, person, days, date, me, deep }) {
+export async function runInsight(env, owner, { prompt, person, days, date, me, deep, handled }) {
   const since = Date.now() - days * DAY;
   const rows = await readyRows(env, owner, deep ? 120 : 80);
   const { text, sources } = buildContext(rows, { since, person, deep, question: prompt });
@@ -56,7 +63,7 @@ export async function runInsight(env, owner, { prompt, person, days, date, me, d
   const res = await llmFetch(env, {
     model: defaultModel(env),
     messages: [
-      { role: 'system', content: insightSystem({ today: date, me, personNotes }) },
+      { role: 'system', content: insightSystem({ today: date, me, personNotes, handled }) },
       { role: 'user', content: `${text}\n\n${person ? `Focus on: ${person}\n` : ''}Request: ${prompt}` },
     ],
   });
@@ -89,7 +96,7 @@ export async function today(request, env, owner) {
     weekly: decorate(await cachedBrief(env, owner, 'weekly', wk)),
     has_recordings: rows.length > 0,
     people,
-    acks: ((await env.DB.prepare('SELECT key FROM brief_acks WHERE owner = ?').bind(owner).all()).results || []).map((r) => r.key),
+    acks: await liveAcks(env, owner),
   });
 }
 
@@ -102,6 +109,7 @@ export async function ackBrief(request, env, owner) {
   const body = await request.json().catch(() => null);
   const key = typeof body?.key === 'string' ? body.key.trim().slice(0, 300) : '';
   if (!key) return fail('key required');
+  await env.DB.prepare('DELETE FROM brief_acks WHERE owner = ? AND created_at < ?').bind(owner, Date.now() - ACK_TTL).run();
   await env.DB.prepare('INSERT OR IGNORE INTO brief_acks (owner, key, created_at) VALUES (?,?,?)').bind(owner, key, Date.now()).run();
   return json({ ok: true });
 }
@@ -124,7 +132,7 @@ export async function brief(request, env, owner) {
   }
   let out;
   try {
-    out = await runInsight(env, owner, { ...AUTO_PROMPTS[kind], date, me: cleanName(body.me) });
+    out = await runInsight(env, owner, { ...AUTO_PROMPTS[kind], date, me: cleanName(body.me), handled: await liveAcks(env, owner) });
   } catch (e) {
     return fail(String(e?.message || e).slice(0, 300), 502);
   }

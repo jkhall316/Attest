@@ -52,6 +52,24 @@ function itemRow(x) {
 
 const ackKey = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().slice(0, 200);
 
+const STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'are', 'was', 'has', 'have', 'not', 'but', 'you', 'your', 'about', 'still', 'open']);
+const tokens = (k) => new Set(k.split(' ').filter((w) => w.length > 2 && !STOP.has(w)));
+// True when `key` is an acknowledged item, or says nearly the same thing in other words
+// (80% of the shorter wording's content words shared, and at least 3 of them).
+export function isAcked(key, set) {
+  if (set.has(key)) return true;
+  const a = tokens(key);
+  if (a.size < 3) return false;
+  for (const other of set) {
+    const b = tokens(other);
+    if (b.size < 3) continue;
+    let shared = 0;
+    for (const w of a) if (b.has(w)) shared++;
+    if (shared >= 3 && shared / Math.min(a.size, b.size) >= 0.8) return true;
+  }
+  return false;
+}
+
 // Adds a ✓ to every bullet in a brief card and hides the ones already acknowledged.
 function decorateBrief(id) {
   const card = $(id);
@@ -60,7 +78,7 @@ function decorateBrief(id) {
   for (const li of card.querySelectorAll('li')) {
     const key = ackKey(li.textContent || '');
     if (!key) continue;
-    if (acks.has(key)) {
+    if (isAcked(key, acks)) {
       const ul = li.parentElement;
       li.remove(); hidden++;
       if (ul && !ul.children.length) ul.remove();

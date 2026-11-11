@@ -54,6 +54,7 @@ function matcher(where, args) {
       const v = args.shift();
       return (r) => r.status !== 'processing' || (r.status_at ?? r.created_at) < v;
     }
+    if ((m = c.match(/^(\w+)\s*<\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] < v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] === v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] !== v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*'([^']*)'$/))) return (r) => r[m[1]] === m[2];
@@ -857,10 +858,13 @@ test('GET /api/today lists open items (overdue, slipping), skips done and other 
 });
 
 test('POST/DELETE /api/today/ack hides a brief item until restored', async () => {
-  const { env, violations } = fakeEnv({ recordings: todayRecs() });
+  const { env, store, violations } = fakeEnv({ recordings: todayRecs() });
   const post = (b) => call('/api/today/ack', { method: 'POST', body: JSON.stringify(b) }, env);
   assert.equal((await post({})).status, 400);
   assert.equal((await post({ key: 'send the deck' })).status, 200);
+  assert.deepEqual((await (await call('/api/today?date=2026-11-10', {}, env)).json()).acks, ['send the deck']);
+  // An acknowledgement older than 7 days expires.
+  store.brief_acks.push({ owner: ME, key: 'old item', created_at: Date.now() - 8 * 86400000 });
   assert.deepEqual((await (await call('/api/today?date=2026-11-10', {}, env)).json()).acks, ['send the deck']);
   assert.equal((await call('/api/today/ack', { method: 'DELETE' }, env)).status, 200);
   assert.deepEqual((await (await call('/api/today?date=2026-11-10', {}, env)).json()).acks, []);
@@ -1472,4 +1476,15 @@ test('POST /:id/reassign moves turns to an existing or a new speaker, keeps name
 
   store.recordings[0].status = 'recording';
   assert.equal((await go({ segments: [0], to: 'A' })).status, 409);
+});
+
+test('the auto brief prompt lists acknowledged items so the model does not repeat them', async () => {
+  const { env, store } = fakeEnv({ recordings: todayRecs() });
+  store.brief_acks.push({ owner: ME, key: 'send the deck to ben', created_at: Date.now() });
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = llmOk(calls);
+  try { await call('/api/today/brief', { method: 'POST', body: JSON.stringify({ kind: 'today', date: '2026-11-10' }) }, env); }
+  finally { globalThis.fetch = realFetch; }
+  assert.match(calls[0].messages[0].content, /already acknowledged[\s\S]*- send the deck to ben/);
 });

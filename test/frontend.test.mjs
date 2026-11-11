@@ -768,3 +768,12 @@ test('the move menu offers "I don\'t know" beside New speaker', async () => {
   const html = moveMenuHtml([{ label: 'A', name: 'Ann' }, { label: 'B', name: null }], { label: 'A', shown: 'Ann' });
   assert.match(html, /data-to="auto"[^>]*>.*I don't know/s);
 });
+
+test('isAcked hides reworded repeats but not different items', async () => {
+  const { isAcked } = await import('../public/app/today.js');
+  const set = new Set(['send the pricing deck to ben by friday']);
+  assert.ok(isAcked('send the pricing deck to ben by friday', set));
+  assert.ok(isAcked('still need to send pricing deck to ben', set));
+  assert.ok(!isAcked('call vendor about the invoice', set));
+  assert.ok(!isAcked('send ben', set));
+});
