@@ -310,6 +310,7 @@ Today is the home screen. It is built to be cheap: nearly everything reads from 
 |---|---|
 | Today's brief | What you committed to, who is waiting on you, what is unresolved. Cached per day, regenerated only after a newer recording. |
 | Weekly review | Themes, decisions, unresolved questions, one thing to focus on. Cached per Monday-based week. |
+| Acknowledging brief items | Each bullet in the brief and weekly review has a **✓**. Click it and the item is hidden, including reworded repeats (an item that shares most of its wording is hidden too), and the next brief is told not to list it again. Acknowledgements expire after 7 days, so something still true comes back. **Show all** under a card restores everything at once. |
 | Overdue and slipping | Open action items whose ISO due date has passed (**overdue**) or that have sat open 7+ days (**slipping**). A count shows on the Today button. |
 | Talk balance, unanswered questions | On every recording. |
 
@@ -634,7 +635,7 @@ scripts/deploy.mjs  the setup and deploy wizard (asks Cloudflare or local first)
 scripts/local-setup.mjs, local-check.mjs, lib/omlx.mjs   local setup and the capability doctor
 ```
 
-**Data.** D1 tables: `recordings` (owner-scoped, with transcript, segments, speakers, summary, action items, mind maps, unanswered, voice match, memory bookkeeping), `people`, `voiceprints` (clips plus 192-float embeddings), `facts`, `briefs`, `custom_templates`, `chats`, `chat_messages`, `settings`, and an FTS5 table for keyword search. R2 holds raw audio (`rec/<id>`) and voiceprint clips (`vp/<personId>/<uuid>`). Optional bindings are `AI` (Workers AI) and `VECTORS` (Vectorize index `attest-memory`).
+**Data.** D1 tables: `recordings` (owner-scoped, with transcript, segments, speakers, summary, action items, mind maps, unanswered, voice match, memory bookkeeping), `people`, `voiceprints` (clips plus 192-float embeddings), `facts`, `briefs`, `brief_acks` (acknowledged brief items, 7-day expiry), `custom_templates`, `chats`, `chat_messages`, `settings`, and an FTS5 table for keyword search. R2 holds raw audio (`rec/<id>`) and voiceprint clips (`vp/<personId>/<uuid>`). Optional bindings are `AI` (Workers AI) and `VECTORS` (Vectorize index `attest-memory`).
 
 **Migrations.** Tables are versioned migrations in `src/schema.js`, applied automatically and atomically on the first request after a deploy and recorded in `schema_migrations`. To change a table, append a new `{ id, sql: [...] }` entry; never edit a shipped one.
 
