@@ -3,6 +3,7 @@
 // you record anything.
 import { existsSync, readFileSync } from 'node:fs';
 import { parseDevVars, listModels, probeChat, probeEmbeddings, probeStt, explainSttError } from './lib/omlx.mjs';
+import { isMain } from './lib/platform.mjs';
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const bad = (m) => console.log(`  ✗ ${m}`);
@@ -49,7 +50,7 @@ export async function check({ file = '.dev.vars', audio = '', f = fetch, log = t
   return results;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const i = process.argv.indexOf('--audio');
   console.log('\nChecking your local setup\n');
   const r = await check({ audio: i > 0 ? process.argv[i + 1] : '' });

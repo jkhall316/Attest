@@ -9,7 +9,7 @@ Attest is a private, self-hosted voice notebook. Run it on **your own Mac** (wit
 ![Bring your own key](https://img.shields.io/badge/AI-OpenRouter%2C%20OpenAI%20or%20local-7ee2a8)
 ![No subscription](https://img.shields.io/badge/price-no%20subscription-lightgrey)
 
-**Jump to:** [Why Attest](#why-attest) · [A day with Attest](#a-day-with-attest) · [Features](#features-at-a-glance) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Full setup guide](#full-setup-guide) · [Using Attest](#using-attest) · [Cost](#cost) · [Run locally](#run-it-locally-on-a-mac-omlx) · [Privacy](#privacy-and-security) · [Troubleshooting](#troubleshooting) · [Limits](#known-limits-honestly) · [For developers](#for-developers)
+**Jump to:** [Why Attest](#why-attest) · [A day with Attest](#a-day-with-attest) · [Features](#features-at-a-glance) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Full setup guide](#full-setup-guide) · [Using Attest](#using-attest) · [Cost](#cost) · [Run locally](#run-it-locally-on-a-mac-omlx) ([Windows/Linux](#run-it-locally-on-windows-or-linux)) · [Privacy](#privacy-and-security) · [Troubleshooting](#troubleshooting) · [Limits](#known-limits-honestly) · [For developers](#for-developers)
 
 ---
 
@@ -129,6 +129,8 @@ npm run local         # then open http://localhost:8787
 ```
 
 If anything fails, `npm run local:check` says which model or step and how to fix it. Details: [Run it locally on a Mac](#run-it-locally-on-a-mac-omlx).
+
+**On Windows or Linux?** Same commands, with LM Studio or Ollama in place of oMLX and a separate Whisper server for transcription: see [Run it locally on Windows or Linux](#run-it-locally-on-windows-or-linux).
 
 Want to hack on the code instead? See [Local dev](#local-dev).
 
@@ -457,6 +459,47 @@ A plain Whisper model transcribes but does not say who spoke. So Attest asks for
 
 **Hybrid.** Because the chat endpoint is just a URL, you could keep the Cloudflare deployment and point `LLM_BASE_URL` at your Mac through a tunnel (Cloudflare Tunnel or Tailscale). That works in principle; your Mac must be reachable and the endpoint authenticated. Untried.
 
+## Run it locally on Windows or Linux
+
+oMLX is Apple Silicon only, but nothing else in local mode is Mac-specific: Attest talks to any OpenAI-compatible server, keeps its search index in the local database, and detects speakers in your browser. On Windows or Linux you run **two** small servers instead of one, because the popular chat servers do not transcribe:
+
+| Role | Server | Notes |
+|---|---|---|
+| Chat and embeddings | [LM Studio](https://lmstudio.ai) (Developer tab, start the server; port 1234) or [Ollama](https://ollama.com) (port 11434) | `setup:local` looks for both. Load the chat model with a **long context** (32k tokens or more). In Ollama the OpenAI-style API cannot raise the context per request, so set `OLLAMA_CONTEXT_LENGTH=32768` (System environment variables on Windows) and restart Ollama. |
+| Transcription | [Speaches](https://speaches.ai) (faster-whisper; port 8000) or whisper.cpp's `whisper-server` | Must serve `/v1/audio/transcriptions` and return timestamped segments (`verbose_json`). For whisper.cpp use `--inference-path /v1/audio/transcriptions --convert` (the browser records WebM, so it needs ffmpeg on `PATH` to convert). |
+
+### Quick start (Windows, PowerShell)
+
+Use PowerShell or Windows Terminal rather than Git Bash's default terminal, which cannot hide the API-key prompts. Node 22 or newer.
+
+```powershell
+# 1. Chat + embeddings: in LM Studio download openai/gpt-oss-20b and an embedding model, then start the server.
+#    Or with Ollama:
+ollama pull gpt-oss:20b
+ollama pull qwen3-embedding:0.6b
+
+# 2. Transcription: Speaches in Docker Desktop with an NVIDIA GPU, then download a Whisper model into it.
+#    (Do not turn on Speaches' batched mode: it needs a VAD filter Attest does not send, and answers HTTP 500.)
+docker run -d --gpus all --restart unless-stopped -p 8000:8000 --name speaches `
+  -v speaches-hf:/home/ubuntu/.cache/huggingface/hub -e WHISPER__COMPUTE_TYPE=float16 `
+  ghcr.io/speaches-ai/speaches:latest-cuda
+Invoke-RestMethod -Method Post http://localhost:8000/v1/models/deepdml/faster-whisper-large-v3-turbo-ct2
+
+# 3. Attest
+npm install
+npm run setup:local      # finds LM Studio/Ollama, then asks for the transcription server (default http://localhost:8000/v1)
+npm run local:check -- --audio speech.wav
+npm run local            # http://localhost:8787
+```
+
+`setup:local` recommends the GGUF equivalents of the Mac models (`openai/gpt-oss-20b` / `gpt-oss:20b` for chat, `qwen3-embedding` for embeddings, `faster-whisper-large-v3-turbo` for transcription) and finds them under either LM Studio's or Ollama's names. Everything in [How speakers are detected locally](#how-speakers-are-detected-locally) and [Other things to know](#other-things-to-know) applies unchanged; read "your Mac" as "your PC". Data lives in `.wrangler\state` in this folder.
+
+**Hardware.** A GPU with 16 GB or more runs the recommended chat model comfortably; with less, pick a smaller model (the Qwen 8-9B class) and expect weaker summaries. Running chat and Whisper on one GPU works if both fit in its memory: on an RTX 5090 (32 GB), `gpt-oss:20b` plus `qwen3-embedding:0.6b` in Ollama (32k context) and Whisper turbo in Speaches all fit at once.
+
+**Keep the folder path short.** Local data lives in `.wrangler\state`, and wrangler's local runtime cannot open its database when the full path passes Windows' 260-character limit (the error is `SQLITE_CANTOPEN`), even with long paths enabled in Windows. A clone in `C:\Users\you\code\Attest` is far below it. In a deeply nested folder, keep the data somewhere short instead: `npm run local -- --persist-to C:\attest-state`.
+
+**Honest status.** Run end to end on Windows 11 with an RTX 5090: Ollama (`gpt-oss:20b`, `qwen3-embedding:0.6b`) plus Speaches (`deepdml/faster-whisper-large-v3-turbo-ct2`, float16). `npm run local:check -- --audio` passed every check, and a 48-second, two-voice recording uploaded through the UI came back ready in about 80 seconds: transcribed with timestamps in about 2.5 seconds, split into the right two speakers in the browser, then summarized with action items, indexed (9 chunks), and answerable from Ask. One limit showed up: when a Whisper segment spans a change of speaker, the whole segment goes to one person, so an action item can be credited to the wrong speaker; check names before trusting owners. (That test used Windows' synthetic voices with no pauses between speakers; real conversations usually split more cleanly.) Not yet tried: LM Studio, whisper.cpp, Linux, and `npm run deploy` (the Cloudflare route) from Windows. `test/platform.test.mjs` covers the command line built for `npx` there, but not a real deploy.
+
 ## Settings
 
 Click the **gear icon in the top right** to change things without redeploying: switch between **OpenAI** and **OpenRouter**, tick which chat and transcription models to offer (with prices shown), pick the default model, add any other model id, replace the API key, add or remove your **Pocket** API key (write-only, like the others), and turn **voice recognition** on or off. (Who "I" and "me" mean is the **Speaking as** chip in the header, not in Settings.) **Save** applies the provider and model changes immediately.
@@ -643,13 +686,14 @@ scripts/local-setup.mjs, local-check.mjs, lib/omlx.mjs   local setup and the cap
 
 ### Tests
 
-`npm test` runs `node --test test/` (207 tests, no network):
+`npm test` runs `node --test "test/*.test.mjs"` (247 tests, no network; the quoted glob is expanded by Node itself, so it works the same in cmd, PowerShell and sh, and needs Node 21 or newer):
 
 - `unit.test.mjs`: pure helpers: diarization merge, FTS query, export shaping, prompts, the speaker evidence filter, the voice matcher, fact validation, chunking, open-items and talk-balance logic.
 - `routes.test.mjs`: the router against a fake D1 and R2 that derives owner scoping from the bound SQL: dispatch order, owner isolation, the live and recover lifecycle, Today and brief caching, facts, the scheduled run, and the semantic path with a fake Workers AI and Vectorize.
 - `schema.test.mjs`: every migration against real SQLite.
 - `frontend.test.mjs`: imports every `public/app/*.js` module with a stubbed DOM, boots the app, and checks escaping and the markdown renderer.
 - `local.test.mjs` and `local-scripts.test.mjs`: tolerant JSON, the local embedding and vector backends on real SQLite, and the setup and doctor scripts against a mock oMLX server.
+- `platform.test.mjs`: the Windows/Linux differences in the setup scripts (entry-point detection, launching `npx` on Windows, ports and model recommendations per platform), checked for every platform on any OS.
 - `zip.test.mjs` and `docx.test.mjs`: archive structure, verified with `unzip -t` and Python's `zipfile` when available.
 
 Not covered: real OpenAI, OpenRouter, D1, R2, Workers AI or Vectorize calls, and the browser-only paths (MediaRecorder, `decodeAudioData`, the ONNX voice model, markmap rendering). Those are exercised by hand against a deploy.
