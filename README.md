@@ -2,11 +2,11 @@
 
 **Record a conversation. Get back who said what, what was decided, what you owe people, and a memory of your work that gets smarter every week.**
 
-Attest is a private, self-hosted voice notebook that runs entirely in *your* Cloudflare account. You record (or upload, or import from a Pocket device), and Attest gives you a speaker-labeled transcript, a summary, action items, mind maps, and a searchable memory of everything you have ever recorded. Then it uses that memory to run your day.
+Attest is a private, self-hosted voice notebook. Run it on **your own Mac** (with a local model server, nothing leaves the machine) or as a Worker in **your own Cloudflare account**. You record (or upload, or import from a Pocket device), and Attest gives you a speaker-labeled transcript, a summary, action items, mind maps, and a searchable memory of everything you have ever recorded. Then it uses that memory to run your day.
 
-![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-F38020)
+![Runs on Cloudflare Workers or locally](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers%20or%20your%20Mac-F38020)
 ![No build step](https://img.shields.io/badge/frontend-no%20build%20step-5b8cff)
-![Bring your own key](https://img.shields.io/badge/AI-OpenAI%20or%20OpenRouter-7ee2a8)
+![Bring your own key](https://img.shields.io/badge/AI-OpenRouter%2C%20OpenAI%20or%20local-7ee2a8)
 ![No subscription](https://img.shields.io/badge/price-no%20subscription-lightgrey)
 
 **Jump to:** [Why Attest](#why-attest) · [A day with Attest](#a-day-with-attest) · [Features](#features-at-a-glance) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Full setup guide](#full-setup-guide) · [Using Attest](#using-attest) · [Cost](#cost) · [Run locally](#run-it-locally-on-a-mac-omlx) · [Privacy](#privacy-and-security) · [Troubleshooting](#troubleshooting) · [Limits](#known-limits-honestly) · [For developers](#for-developers)
