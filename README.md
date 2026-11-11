@@ -58,15 +58,32 @@ Most AI note-takers are a subscription, run on someone else's servers, and forge
 
 ```mermaid
 flowchart LR
-  A["Record, upload,<br/>or Pocket import"] --> B["Transcribe and<br/>label speakers"]
-  B --> C["Match enrolled voices<br/>in your browser"]
-  C --> D["Summarize: summary, action items,<br/>mind maps, unanswered, facts"]
-  D --> E[("D1 + R2 + Vectorize<br/>in your Cloudflare account")]
-  E --> F["Today: briefs, open items,<br/>prompts"]
-  E --> G["Ask Attest: semantic<br/>plus keyword search"]
+  S{"Where does<br/>Attest run?"}
+
+  S -->|"Cloudflare Workers"| C1["Record, upload,<br/>or Pocket import"]
+  C1 --> C2["Hosted transcriber labels speakers<br/>(OpenRouter or OpenAI)"]
+  C2 --> M["Match enrolled voices<br/>in your browser"]
+  M --> C3["Hosted chat model: summary, action items,<br/>mind maps, unanswered, facts"]
+  C3 --> C4[("D1 + R2 + Vectorize<br/>in your Cloudflare account")]
+
+  S -->|"Your Mac"| L1["Record or upload"]
+  L1 --> L2["Local Whisper (oMLX)<br/>transcribes with timestamps"]
+  L2 --> L3["Your browser works out who spoke<br/>by clustering voices"]
+  L3 --> M2["Match enrolled voices<br/>in your browser"]
+  M2 --> L4["Local chat model: summary, action items,<br/>mind maps, unanswered, facts"]
+  L4 --> L5[("Local D1 + R2 + vector index<br/>on disk, in .wrangler/state")]
+
+  C4 --> F["Today: briefs, open items, prompts"]
+  C4 --> G["Ask Attest: semantic plus keyword search"]
+  L5 --> F
+  L5 --> G
 ```
 
-Everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket imports and builds memory for older recordings. Details are in [For developers](#for-developers).
+**On Cloudflare**, everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket imports and builds memory for older recordings. Start at [Route A](#route-a-cloudflare--openrouter).
+
+**On your Mac**, the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to a model server on your machine. Nothing leaves it, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only).
+
+Details for both are in [For developers](#for-developers).
 
 ## Quick start
 
