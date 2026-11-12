@@ -40,7 +40,8 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 | | What you get | Needs | Details |
 |---|---|---|---|
 | **Record, upload, import** | Browser recorder with live preview and crash recovery, file upload, Pocket import, Omi import | nothing extra (Pocket and Omi need a key) | [Recording](#recording-uploading-importing) |
-| **Areas** | Every recording is tagged Work, Personal, Health or Learning, picked for you and changeable; a header filter limits the lists, Today, Ask, memory and export to one area | nothing | [Areas](#areas-work-personal-health-learning) |
+| **One recording, one conversation** | Dead air is trimmed, different conversations are split apart, and pieces of one call are joined back together. Originals are kept and every change can be undone | nothing | [Conversation shaping](#conversation-shaping-one-recording-one-conversation) |
+| **Areas** | Every recording is filed under Work, Personal, Health or Learning, picked for you and easy to change; one dropdown at the top shows only one area | nothing | [Areas](#areas-work-personal-health-learning) |
 | **Devices you choose** | Tick the ones you use (the app, Pocket, Omi, a Limitless pendant); the main screen, setup and background sync follow your choice | nothing | [Choosing your devices](#choosing-your-devices) |
 | **Phone and Mac app** | Attest in a native shell, a bottom tab bar on phones, and a **Bluetooth pendant sync** with background upload on iPhone | an Apple developer account to run it on your phone | [apple/README.md](apple/README.md) |
 | **Speaker labels** | Who said what, from OpenAI's diarize model or OpenRouter models that label speakers | a labeling transcriber | [Speakers and voices](#speakers-and-voices) |
@@ -48,7 +49,7 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 | **Voice recognition** | Enrolled voices recognised on any provider, in your browser | a 49 MB model, downloaded once | [Speakers and voices](#speakers-and-voices) |
 | **88 summary presets** | Meeting, sales call, interview, lecture, medical visit, and 80 more, plus your own | nothing | [Summaries and mind maps](#summaries-and-mind-maps) |
 | **Three mind maps** | Topic, driver (decisions and actions), people | nothing | [Summaries and mind maps](#summaries-and-mind-maps) |
-| **Today screen** | Daily brief, weekly review, open and overdue items, 10 prefilled prompts | nothing | [The Today screen](#the-today-screen) |
+| **Today screen** | A daily brief that leads the screen (do first, due and overdue, waiting on others, decisions, who to follow up with), a to-do list sorted by when it matters, a weekly review, 10 prefilled prompts | nothing | [The Today screen](#the-today-screen) |
 | **Memory** | Verified facts per recording, plus talk balance and unanswered questions | nothing | [Memory and semantic search](#memory-and-semantic-search) |
 | **Semantic search** | Ask by meaning across your whole history | Workers AI and Vectorize (free allowances, set up by deploy) | [Memory and semantic search](#memory-and-semantic-search) |
 | **Ask Attest** | Chat threads, plus a deeper 3-pass research mode | nothing | [Ask Attest](#ask-attest) |
@@ -68,8 +69,12 @@ flowchart LR
   M --> C3["Hosted chat model: summary, action items,<br/>mind maps, unanswered, facts"]
   C3 --> C4[("D1 + R2 + Vectorize<br/>in your Cloudflare account")]
 
-  S -->|"Your Mac"| L1["Record or upload"]
-  L1 --> L2["Local Whisper (oMLX)<br/>transcribes with timestamps"]
+  S -->|"Your computer"| L0{"Mac or<br/>Windows?"}
+  L0 -->|"Mac (Apple Silicon)"| LM["oMLX: one server for<br/>chat, embeddings and Whisper"]
+  L0 -->|"Windows (tested) or Linux"| LW["Ollama or LM Studio for chat + embeddings,<br/>plus Speaches (Whisper) for transcription"]
+  LM --> L1["Record or upload"]
+  LW --> L1
+  L1 --> L2["Local Whisper transcribes<br/>with timestamps"]
   L2 --> L3["Your browser works out who spoke<br/>by clustering voices"]
   L3 --> M2["Match enrolled voices<br/>in your browser"]
   M2 --> L4["Local chat model: summary, action items,<br/>mind maps, unanswered, facts"]
@@ -83,11 +88,15 @@ flowchart LR
 
 **On Cloudflare**, everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket and Omi imports (the ones you ticked) and builds memory for older recordings. Start at [Route A](#route-a-cloudflare--openrouter).
 
-**On your Mac**, the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to a model server on your machine. Nothing leaves it, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only).
+**On your own computer** (a Mac, or a Windows PC; Linux should work but is untried), the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to model servers on your machine: oMLX on a Mac, or Ollama (or LM Studio) plus Speaches on Windows. The Windows path has been run end to end on Windows 11 with Ollama and Speaches; LM Studio, whisper.cpp, Linux and deploying to Cloudflare *from* Windows have not been tried yet. Nothing leaves your computer, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only), or [Windows or Linux](#run-it-locally-on-windows-or-linux).
 
 Details for both are in [For developers](#for-developers).
 
 ## Quick start
+
+> **New here? Follow [SETUP.md](SETUP.md).** It is a complete, step-by-step guide for every route, written for someone who has never used a terminal, with a "you should see…" check after each step and a fix for each common problem.
+>
+> **The short version of our advice: use Route A (Cloudflare + OpenRouter) and accept every default.** It is the one that is simplest to keep working, works from your phone, and processes recordings while you sleep. Choose a local route only if keeping everything off the internet matters more than convenience.
 
 **Pick one route.** Both give you the same app; they differ in where it runs and what it costs.
 
@@ -343,13 +352,38 @@ Speech models invent text over silence and room noise: "Thank you." repeated doz
 
 ### Areas: work, personal, health, learning
 
-Every recording belongs to one of four areas, so a work life and a home life do not blur together.
+Every recording belongs to one of four areas, so your work life and your home life do not blur together.
 
-- **Picked for you.** A new recording starts in the area its summary style implies (Meeting, Standup and Sales calls are Work; Journal and Voice memo are Personal; Medical visit and similar are Health; Lecture and Research styles are Learning). When the summary is written, the model also reads the content and may move it, so a doctor's visit recorded with the plain Meeting style ends up in Health. Imports from Pocket, Omi and the pendant app are classified the same way once processed.
-- **Change it any time.** Use the area dropdown on the recording page. A choice you make stays put: reprocessing and re-summarizing never overwrite it. Pick **Auto-pick again** to hand it back.
-- **Filter everything.** The **All areas / Work / Personal / Health / Learning** dropdown in the header (saved in your browser) limits the sidebar, command palette, Today (open items and the daily and weekly briefs, each cached per area), prompts, Ask and chats, memory, the People counts and exports. While a filter is on, a new recording is tagged with that area.
-- **Recordings from before this existed** are all Work. Run `POST /api/recordings/areas/backfill` once to re-derive each automatic one from its summary style; anything you chose by hand is left alone.
-- **API.** `GET /api/recordings`, `/api/today`, `/api/memory`, `/api/people` and `/api/export` take `?area=<work|personal|health|learning>`; `POST /api/ask`, `/api/chats/:id/messages`, `/api/today/brief` and `/api/insight` take `area` in the body; a missing or unknown value means all. Uploads (`POST /api/recordings`, form field `area`) and `POST /api/recordings/live` (JSON field `area`) accept an explicit area. `PATCH /api/recordings/:id/area {area}` sets one (`"auto"` hands it back).
+- **Attest picks one for you.** It starts from the kind of summary (a Meeting is Work, a Journal entry is Personal, a Medical visit is Health, a Lecture is Learning), then reads what was actually said and corrects itself. A doctor's appointment recorded as a plain "Meeting" ends up in Health. Recordings that arrive from Pocket, Omi or the pendant are sorted the same way once they are processed.
+- **Change it any time.** Use the area dropdown on the recording's page. Once you choose, Attest never changes it again, even if you re-summarize. Pick **Auto-pick again** to hand the choice back.
+- **Look at one area at a time.** The **All areas / Work / Personal / Health / Learning** dropdown at the top (next to Speaking as) limits everything you see: the recording list, search, Today and its brief, Ask, memory, people counts and exports. While a filter is on, anything you record is filed in that area. The choice is remembered in your browser.
+- **Older recordings** from before areas existed all start in Work. Change the ones that belong elsewhere from their page.
+
+<details><summary>For tinkerers</summary>
+
+`GET /api/recordings`, `/api/today`, `/api/memory`, `/api/people` and `/api/export` take `?area=work|personal|health|learning`; `POST /api/ask`, `/api/chats/:id/messages`, `/api/today/brief` and `/api/insight` take `area` in the body. A missing or unknown value means all areas. Uploads and `POST /api/recordings/live` accept an `area` field. `PATCH /api/recordings/:id/area {"area": "health"}` sets one (`"auto"` hands it back). `POST /api/recordings/areas/backfill` re-derives every automatic area of older recordings from their summary style once, leaving your own choices alone.
+</details>
+
+### Conversation shaping: one recording, one conversation
+
+Recorders cut calls wherever they like. Pocket and the pendant chop one long call into several recordings; Omi sometimes glues unrelated conversations into one. Attest fixes this by listening to where people actually talk, not where the app drew its lines:
+
+- **Dead air is trimmed.** If nothing is said for more than 30 seconds at the start or end of a recording, that stretch is cut off (a few seconds are kept so nothing is clipped).
+- **Different conversations are split.** A silence of 5 minutes or more between two stretches of talking means two different conversations. Each becomes its own recording with its own audio, summary, speakers and area, titled like "Lunch chat (2/3)". A few stray words on their own are folded into the nearest conversation instead of becoming a recording, and a very long unbroken one (over 100 minutes) is cut at its longest pause.
+- **Pieces of one call are joined.** Recordings from the same device or Pocket that are only a few minutes apart are put back together **before** they are transcribed, so the whole call is transcribed once and the speakers stay consistent. This happens automatically when they arrive.
+
+The sound is cut and joined **without re-encoding**, so there is no loss in quality. This works for the common formats (MP3, WAV and the browser's and pendant's recordings). For other formats, or very large files, Attest still splits the *text* into separate conversations, but the pieces will not have their own audio (the sound stays on the original, and Undo brings it back).
+
+**Nothing is ever lost.** The original is kept out of sight, not deleted. A recording made this way says so at the top, with an **Undo** button that removes the new pieces and brings the original back. A joined call unwinds all the way back to its original pieces, and they will not be joined again. If you delete every piece of a split, the hidden original is deleted too, so nothing lingers where you cannot see it.
+
+**Do it by hand.** For a recording that was summarized before this existed, open it and press **Split by silence**. If two recordings were really one call, open the later one and press **Join with previous**. That one transcribes the joined audio again, because the speaker names from two separate transcripts do not line up.
+
+**Limits.** It needs word-by-word timing from the transcriber, so a recording transcribed as plain text with no timing is left alone.
+
+<details><summary>For tinkerers</summary>
+
+Optional settings (Worker variables): `SPLIT_GAP_MIN` (default 5 minutes), `TRIM_MIN_SEC` (default 30 seconds), `MERGE_GAP_MIN` (default 3 minutes); `RESHAPE=off` turns all of it off. API: `POST /api/recordings/:id/reshape`, `POST /api/recordings/:id/undo-reshape`, `POST /api/recordings/merge {"ids": [...]}`. `POST /api/recordings/:id/process` answers with the first new recording and a `split_into` list when it split one. Audio is handled by pure-JavaScript container code (`src/audio/`), since a Worker cannot run ffmpeg; files over 48 MB are never cut.
+</details>
 
 ### Summaries and mind maps
 
@@ -360,17 +394,15 @@ Every recording belongs to one of four areas, so a work life and a home life do 
 
 ### The Today screen
 
-Today is the home screen. It is built to be cheap: nearly everything reads from the [memory](#memory-and-semantic-search) instead of re-reading transcripts.
+Today is the home screen, and it is built around one question: **what do I need to do today?**
 
-**Runs on its own** (you can turn auto briefs off with the checkbox):
-
-| | What it does |
-|---|---|
-| Today's brief | What you committed to, who is waiting on you, what is unresolved. Cached per day, regenerated only after a newer recording. |
-| Weekly review | Themes, decisions, unresolved questions, one thing to focus on. Cached per Monday-based week. |
-| Acknowledging brief items | Each bullet in the brief and weekly review has a **✓**. Click it and the item is hidden, including reworded repeats (an item that shares most of its wording is hidden too), and the next brief is told not to list it again. Acknowledgements expire after 7 days, so something still true comes back. **Show all** under a card restores everything at once. |
-| Overdue and slipping | Open action items whose ISO due date has passed (**overdue**) or that have sat open 7+ days (**slipping**). A count shows on the Today button. |
-| Talk balance, unanswered questions | On every recording. |
+- **Your brief comes first.** It fills the main part of the screen, ready when you open Attest. It is written like a chief of staff would hand it to you: the **three things to do first** and why they are urgent now, what is **due or overdue**, what **other people owe you** (with a one-line nudge you could send), **decisions that are stuck**, **people to follow up with**, and **what changed since yesterday**. It leans on the last two days, leaves out any section with nothing real in it, and says where each point came from.
+- **Numbers at a glance.** Above the brief, small chips show how many things are overdue, due today, due this week, slipping, or waiting on others.
+- **Needs you.** Beside the brief (below it on a narrow screen) your open to-dos are sorted by *when* they matter: **Overdue**, **Due today**, **This week**, **Slipping** (open a week or more with no date), **Open**, **Later**, and **Waiting on others**. If you have set **Speaking as**, other people's to-dos move to "Waiting on others" instead of cluttering yours, and **Mine / Everyone** switches the view. Tick a to-do when it is done.
+- **The brief and the list agree.** The brief is written from the same sorted list you see on screen, so it never calls something overdue that the list does not, or the other way round.
+- **Weekly review.** Themes, decisions, open questions and one thing to focus on, once a week.
+- **Hide what you have handled.** Each bullet in the brief has a **✓**. Click it and the item disappears, along with reworded repeats, and the next brief is told not to bring it up again. After 7 days it can come back if it is still true. **Show all** brings everything back at once.
+- **Turn it off.** Untick *Write briefs automatically* if you would rather write them yourself with **Refresh**. Each brief is one small request to your AI provider, and it is only rewritten after a newer recording arrives.
 
 **Prefilled prompts** (click a chip, edit the text, press Run). Pick a person and a time window (1 to 60 days) first where it applies:
 
@@ -381,7 +413,7 @@ Today is the home screen. It is built to be cheap: nearly everything reads from 
 | End-of-day wrap | Customer or client pulse | Coach me |
 | | What changed? | |
 
-Each Run is one model call over a window of your recordings plus their remembered facts. Choose **Speaking as** (the chip at the top right) so "I", "me" and "my" in prompts and briefs mean you. It also puts your own action items behind a **Mine / Everyone** filter on Today and tags you in talk balance; it is stored only in your browser. Advice about people is the model's opinion from the transcripts, with quotes, and it says when evidence is thin.
+Each Run is one request over a window of your recordings plus what Attest remembers from them. Choose **Speaking as** (the button at the top right) so "I", "me" and "my" in prompts and briefs mean you. It also lets Today separate your to-dos from other people's, and marks you in talk balance; it is remembered only in your browser. Advice about people is the model's opinion from the transcripts, with quotes, and it says when evidence is thin.
 
 ### Memory and semantic search
 
@@ -390,6 +422,8 @@ Two layers make Ask and Today smarter and cheaper as your history grows.
 **Structured facts.** Every summarize call also returns durable facts, each one a `commitment` (someone promised something), `decision`, `preference` (how a person works or communicates), `relationship`, or `fact` (a date, number or plan), with the person it concerns and a **verbatim quote**. A fact whose quote is not found in the transcript is thrown away, the same evidence rule speaker naming uses, so the model cannot invent memories. Facts are replaced when a recording is re-summarized (a ticked promise stays ticked) and deleted with the recording. Today, then Memory, lists them, filterable by kind and person. Tick a promise when done, or **forget** a wrong fact (the recording itself is unchanged).
 
 **Semantic index.** Each recording's summary, facts and overlapping transcript passages (about 900 characters each, up to 120 per recording, so roughly the first 1.5 hours of a very long one) are embedded with Workers AI and stored in Vectorize, namespaced by a hash of the owner so one person's questions never search another's data. Ask then retrieves by meaning, topped up with keyword hits, and sends only the matching passages to the model. If Vectorize errors, the question is answered with keyword search instead. Set it up with [Semantic search setup](#semantic-search-setup).
+
+**Unnamed speakers fade out of the list.** When Attest could not tell who said something (the speaker is just "Unknown"), that item shows on the Memory list for **7 days** after the recording, long enough for you to tag the speaker and have it named properly. After that, if it is still unnamed, it quietly leaves the Memory list and the daily brief. It is **not deleted**: it stays searchable, so Ask can still find it, it just is not pushed in front of you. Anything about a named person always stays on the list.
 
 **Staying current.** New recordings are memorized as soon as they finish summarizing. Older recordings catch up on their own, two per 15 minutes, or press **Build memory from N past recordings** to do it now.
 

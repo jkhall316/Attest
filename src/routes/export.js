@@ -14,7 +14,7 @@ export async function exportAll(env, owner, id, format, area = '') {
   const rows = id
     ? [(await readRow(env, id, owner))].filter(Boolean)
     : (await env.DB.prepare(
-        `SELECT * FROM recordings WHERE owner = ? AND status = 'ready'${ac.sql} ORDER BY created_at`
+        `SELECT * FROM recordings WHERE owner = ? AND status = 'ready' AND hidden = 0${ac.sql} ORDER BY created_at`
       ).bind(owner, ...ac.binds).all()).results.map((r) => ({ ...r, action_items: safeParse(r.action_items) }));
   if (!rows.length) return fail('nothing to export', 404);
   // html and docx are single-document formats; without an id they used to silently

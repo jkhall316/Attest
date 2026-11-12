@@ -52,7 +52,7 @@ test('a failing migration rolls back whole and is not recorded', async () => {
   const bad = [...MIGRATIONS, { id: 99, sql: ['ALTER TABLE recordings ADD COLUMN ok1 TEXT', 'NOT SQL'] }];
   await assert.rejects(() => runMigrations(db, bad));
   assert.ok(!db.raw.prepare('PRAGMA table_info(recordings)').all().some((c) => c.name === 'ok1'));
-  assert.deepEqual(db.raw.prepare('SELECT id FROM schema_migrations').all().map((r) => r.id), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(db.raw.prepare('SELECT id FROM schema_migrations').all().map((r) => r.id), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 });
 
 test('migration 4 adds recordings.unanswered and the briefs table', async () => {
@@ -89,7 +89,15 @@ test('migration 11 adds area (default work) and area_source (default auto) to ex
   const db = d1();
   await runMigrations(db, MIGRATIONS.filter((m) => m.id < 11));
   db.raw.prepare("INSERT INTO recordings (id, owner, title, created_at, r2_key) VALUES ('a','o','t',1,'k')").run();
-  assert.deepEqual(await runMigrations(db), [11]);
+  assert.deepEqual(await runMigrations(db), [11, 12]);
   const r = db.raw.prepare("SELECT area, area_source FROM recordings WHERE id = 'a'").get();
   assert.deepEqual({ ...r }, { area: 'work', area_source: 'auto' });
+});
+
+test('migration 12 adds hidden (default 0), lineage and src', async () => {
+  const db = d1();
+  await runMigrations(db);
+  db.raw.prepare("INSERT INTO recordings (id, owner, title, created_at, r2_key) VALUES ('a','o','t',1,'k')").run();
+  const r = db.raw.prepare("SELECT hidden, lineage, src FROM recordings WHERE id = 'a'").get();
+  assert.deepEqual({ ...r }, { hidden: 0, lineage: null, src: null });
 });

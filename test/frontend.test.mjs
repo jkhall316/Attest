@@ -893,3 +893,43 @@ test('the recording page offers an area picker with the current area selected', 
   assert.match(html, /<option value="personal" selected>/);
   assert.match(html, /Auto-pick again/);
 });
+
+test('a recording made by shaping says so and offers undo; a hidden original offers to come back', async () => {
+  const { render } = await import('../public/app/recordings.js');
+  const base = { id: 'r1', title: 'T', created_at: 1, status: 'ready', template: 'meeting', has_audio: true, summary: 's', action_items: [], speakers: [], transcript: 't', segments: null, mindmaps: null, unanswered: [], area: 'work', area_source: 'auto' };
+  render({ ...base, lineage: { kind: 'split', from: ['x'], part: 2, of: 3, audio: true } });
+  let html = elements.get('main').innerHTML;
+  assert.match(html, /Part 2 of 3/);
+  assert.match(html, /id="undo-shape"/);
+  render({ ...base, lineage: { kind: 'split', from: ['x'], part: 1, of: 2, audio: false } });
+  assert.match(elements.get('main').innerHTML, /sound stays on the original/);
+  render({ ...base, hidden: true });
+  html = elements.get('main').innerHTML;
+  assert.match(html, /Undo and bring it back/);
+  assert.doesNotMatch(html, /id="reshape"/);
+  render({ ...base, segments: [{ speaker: 'A', text: 'hi', start: 0, end: 1 }, { speaker: 'B', text: 'yo', start: 1, end: 2 }] });
+  assert.match(elements.get('main').innerHTML, /id="reshape"/);
+});
+
+test('reminders: the browser and the server put every open item in the same bucket', async () => {
+  const client = await import('../public/app/reminders.js');
+  const server = await import('../src/insights.js');
+  const today = '2026-11-11';
+  const items = [
+    { due: '2026-11-01', overdue: true }, { due: '2026-11-11' }, { due: '2026-11-15' }, { due: '2026-12-30' },
+    { due: null, slipping: true }, { due: null }, { due: 'Friday', slipping: true },
+  ];
+  for (const x of items) for (const mine of [true, false]) assert.equal(client.reminderBucket(x, today, mine), server.reminderBucket(x, today, mine));
+  assert.deepEqual(items.map((x) => client.reminderBucket(x, today)), ['overdue', 'today', 'week', 'later', 'slipping', 'open', 'slipping']);
+  assert.deepEqual(client.BUCKETS, server.BUCKETS);
+  const g = client.groupReminders([{ owner: 'Ben', due: null }, { owner: 'Jeff', due: '2026-11-11' }], today, (x) => x.owner === 'Jeff');
+  assert.deepEqual([...g.keys()].sort(), ['today', 'waiting']);
+});
+
+test('a brief that opens with only a title does not render an empty card', async () => {
+  const { noteHtml } = await import('../public/app/recordings.js');
+  const html = noteHtml("# Jeff's Today's Brief (2026-11-11)\n\n## Do first\n- **Send** the deck\n\n## Due and overdue\n- **Budget** by Friday");
+  assert.doesNotMatch(html, /Today's Brief/);
+  assert.equal((html.match(/<details/g) || []).length, 2);
+  assert.match(html, /Do first/);
+});

@@ -824,3 +824,12 @@ test('withRateLimitRetry gives up after the last try and returns the 429', async
   const r = await withRateLimitRetry(async () => new Response('x', { status: 429 }), { tries: 2, sleep: async () => {} });
   assert.equal(r.status, 429);
 });
+
+import { isListedFact, UNTAGGED_LISTED_MS } from '../src/memory.js';
+test('isListedFact: named people always, unnamed only for a week after the recording', () => {
+  const now = 1_000_000_000_000;
+  assert.equal(isListedFact({ person: 'Ben', created_at: now - 365 * 86400000 }, now), true);
+  assert.equal(isListedFact({ person: null, created_at: now - 6.9 * 86400000 }, now), true);
+  assert.equal(isListedFact({ person: null, created_at: now - UNTAGGED_LISTED_MS - 1000 }, now), false);
+  assert.equal(isListedFact({ person: '', created_at: now - 30 * 86400000 }, now), false);
+});

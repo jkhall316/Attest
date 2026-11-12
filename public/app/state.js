@@ -4,6 +4,7 @@
 
 export const state = {
   META: null,          // /api/meta payload
+  recordings: [],      // the sidebar list, newest first
   TPL: null,           // builtin + custom template map
   current: null,       // open recording id
   currentChat: null,   // open chat id

@@ -139,11 +139,66 @@ export function insightSystem({ today, me, personNotes, handled }) {
   ].filter(Boolean).join('\n');
 }
 
+// Does `name` (an action item's owner) refer to `me`? Whole words only, either way round, so "Jeff"
+// matches "Jeff Eberhard" and "Al" never matches "Alex". Same rule as the browser's isMe().
+export function isMeName(name, me) {
+  const w = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s'-]/gu, ' ').split(/\s+/).filter(Boolean);
+  const a = w(name), b = w(me);
+  if (!a.length || !b.length) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.every((x) => long.includes(x));
+}
+
+// Which bucket an open item belongs in for reminders: the one place this is decided, so the brief
+// and the Today screen agree. `today` is YYYY-MM-DD, `me` the viewer's name (or '').
+export function reminderBucket(item, today, isMine = true) {
+  const iso = typeof item.due === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.due) ? item.due.slice(0, 10) : null;
+  if (!isMine) return 'waiting';
+  if (item.overdue) return 'overdue';
+  if (iso === today) return 'today';
+  if (iso) {
+    const days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY);
+    return days <= 7 ? 'week' : 'later';
+  }
+  return item.slipping ? 'slipping' : 'open';
+}
+export const BUCKETS = [
+  ['overdue', 'Overdue'], ['today', 'Due today'], ['week', 'This week'], ['slipping', 'Slipping'],
+  ['open', 'Open'], ['later', 'Later'], ['waiting', 'Waiting on others'],
+];
+
+// The facts the brief must start from, computed rather than left for the model to work out: what is
+// overdue, due today and this week, slipping, and what others owe the user. `isMine(owner)` says
+// whether an owner is the user (an item with no owner counts as theirs).
+export function groundTruth(items, today, me, isMine) {
+  const mine = (x) => !me || !x.owner || isMine(x.owner, me);
+  const lines = {};
+  for (const x of items) {
+    const b = reminderBucket(x, today, mine(x));
+    (lines[b] ||= []).push(`- ${x.task}${x.owner ? ` (${x.owner})` : ''}${x.due ? ` due ${x.due}` : ''} [${x.title}, ${x.age_days}d ago]`);
+  }
+  const out = BUCKETS.filter(([k]) => lines[k]?.length)
+    .map(([k, label]) => `${label} (${lines[k].length}):\n${lines[k].slice(0, 12).join('\n')}`);
+  return out.length ? `Open commitments already worked out from the recordings (authoritative; do not recount them):\n\n${out.join('\n\n')}` : '';
+}
+
 // The two prompts that run on their own, cached per day / per week in the briefs table.
 export const AUTO_PROMPTS = {
   today: {
-    days: 7,
-    prompt: 'Give me today\'s brief. (1) What I committed to and what is still open, most urgent first. (2) Who is waiting on me or on whom I am waiting. (3) Anything unresolved I should settle today. Keep it under 200 words.',
+    days: 10,
+    ground: true, // the open-commitment lists above are added to what the model sees
+    prompt: [
+      'Write my brief for today, as a chief of staff would hand it to me on my way into the day.',
+      'Use exactly these markdown sections, in this order, and leave out any section with nothing real in it:',
+      '## Do first: the three things that matter most today, each with why it is urgent now (a deadline, someone waiting, something blocked on it).',
+      '## Due and overdue: dated commitments, soonest first, with the date and who is waiting.',
+      '## Waiting on others: what other people owe me, who, since when, and a one-line nudge I could send.',
+      '## Decide today: questions or decisions that are stuck, with the options raised in the recordings.',
+      '## People: anyone I should reach out to or follow up with, and the reason.',
+      '## Since yesterday: what changed in the last day that affects today\'s plans.',
+      'Each bullet starts with the bold key noun or name, then one plain sentence, then the recording and date in parentheses.',
+      'Weigh the last 48 hours most. Under 400 words. Where something is not in the recordings, say nothing rather than guess.',
+    ].join('\n'),
   },
   weekly: {
     days: 7,

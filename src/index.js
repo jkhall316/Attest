@@ -22,10 +22,12 @@ import { TEMPLATES } from './templates.js';
 import { json, fail, ownerOf } from './http.js';
 import { readRow } from './db.js';
 import { areaClause } from './areas.js';
+import { VISIBLE } from './conversations.js';
+import { mergeNow, undoReshape } from './routes/reshape.js';
 import { effectiveStatus, safeParse } from './text.js';
 import {
   upload, process as processRecording, audio, remove, voiceMatch, resummarize, setActionDone, speakerTurns, resetSpeakers, reassign,
-  liveStart, liveChunk, liveAudio, livePart, liveRecover, setArea, backfillAreas,
+  liveStart, liveChunk, liveAudio, livePart, liveRecover, setArea, backfillAreas, reshapeNow,
 } from './routes/recordings.js';
 import { listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
 import { today, brief, ackBrief, insight } from './routes/today.js';
@@ -103,8 +105,8 @@ export default {
       if (pathname === '/api/recordings' && m === 'GET') {
         const ac = areaClause(new URL(request.url).searchParams.get('area'));
         const rows = (await env.DB.prepare(
-          `SELECT id, title, created_at, duration_ms, status, error, template, status_at, speakers, area, area_source
-             FROM recordings WHERE owner = ?${ac.sql} ORDER BY created_at DESC LIMIT 200`
+          `SELECT id, title, created_at, duration_ms, status, error, template, status_at, speakers, area, area_source, lineage
+             FROM recordings WHERE owner = ?${VISIBLE}${ac.sql} ORDER BY created_at DESC LIMIT 200`
         ).bind(owner, ...ac.binds).all()).results;
         // A live recording that never finalized would otherwise show as 'recording'
         // forever; report it as abandoned instead of leaving a stuck row.
@@ -117,6 +119,7 @@ export default {
 
       if (pathname === '/api/recordings' && m === 'POST') return upload(request, env, owner);
       if (pathname === '/api/recordings/areas/backfill' && m === 'POST') return backfillAreas(env, owner);
+      if (pathname === '/api/recordings/merge' && m === 'POST') return mergeNow(request, env, owner);
 
       /* --- #7 live transcription --- */
       // Collection route (exact pathname), checked ahead of the generic /:id routes
@@ -225,6 +228,12 @@ export default {
 
       if (rest && rest.endsWith('/resummarize') && m === 'POST')
         return resummarize(env, rest.slice(0, -'/resummarize'.length), owner);
+
+      if (rest && rest.endsWith('/reshape') && m === 'POST')
+        return reshapeNow(env, owner, rest.slice(0, -'/reshape'.length));
+
+      if (rest && rest.endsWith('/undo-reshape') && m === 'POST')
+        return undoReshape(env, owner, rest.slice(0, -'/undo-reshape'.length));
 
       if (rest && rest.endsWith('/area') && m === 'PATCH')
         return setArea(request, env, owner, rest.slice(0, -'/area'.length));

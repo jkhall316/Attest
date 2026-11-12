@@ -9,6 +9,8 @@ import { importNew as importOmiNew } from './routes/omi.js';
 import { process as processRecording } from './routes/recordings.js';
 import { runBackfill } from './routes/memory.js';
 import { sourcesOf } from './sources.js';
+import { holdForMerge, shapeOptions } from './conversations.js';
+import { consolidate } from './routes/reshape.js';
 
 const IMPORT_PER_TICK = 2;
 const PROCESS_PER_TICK = 2;
@@ -30,12 +32,21 @@ export async function runScheduled(env) {
     try { await importOmiNew(env, owner, 3, IMPORT_PER_TICK); }
     catch (e) { console.error('scheduled omi import failed:', e?.message || e); }
   }
+  try { await consolidate(env, owner); }
+  catch (e) { console.error('scheduled merge failed:', e?.message || e); }
   const waiting = (await env.DB.prepare(
     `SELECT id FROM recordings WHERE owner = ? AND (pocket_id IS NOT NULL OR omi_id IS NOT NULL)
-        AND status IN ('uploaded', 'transcribed')
+        AND status IN ('uploaded', 'transcribed') AND hidden = 0
       ORDER BY created_at DESC LIMIT ?`
-  ).bind(owner, PROCESS_PER_TICK).all()).results || [];
-  for (const { id } of waiting) {
+  ).bind(owner, PROCESS_PER_TICK + 6).all()).results || [];
+  const rowsWaiting = [];
+  for (const w of waiting) {
+    const row = await env.DB.prepare('SELECT id, src, created_at, duration_ms FROM recordings WHERE id = ? AND owner = ?').bind(w.id, owner).first();
+    // the newest piece of a stream may still get its other half: give it a few minutes before transcribing
+    if (row && !holdForMerge(row, Date.now(), shapeOptions(env))) rowsWaiting.push(w);
+    if (rowsWaiting.length >= PROCESS_PER_TICK) break;
+  }
+  for (const { id } of rowsWaiting) {
     try { await processRecording(env, id, owner); }
     catch (e) { console.error('scheduled process failed:', id, e?.message || e); }
   }

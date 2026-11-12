@@ -26,11 +26,13 @@ export async function retrieve(env, owner, question, area = '') {
   if (vectorsEnabled(env)) {
     try {
       semantic = chunksToHits(await semanticChunks(env, owner, question));
-      // The index knows nothing about areas, so keep only hits whose recording is in the chosen one.
-      if (inArea && semantic.length) {
+      // The index knows nothing about areas, and it is eventually consistent, so a recording that was
+      // just split, joined or deleted can still turn up. Keep only hits that are visible (and in the
+      // chosen area).
+      if (semantic.length) {
         const ok = new Set(((await env.DB.prepare(
-          `SELECT id FROM recordings WHERE owner = ? AND area = ? AND id IN (${semantic.map(() => '?').join(',')})`
-        ).bind(owner, inArea, ...semantic.map((h) => h.id)).all()).results || []).map((r) => r.id));
+          `SELECT id FROM recordings WHERE owner = ? AND hidden = 0${inArea ? ' AND area = ?' : ''} AND id IN (${semantic.map(() => '?').join(',')})`
+        ).bind(owner, ...(inArea ? [inArea] : []), ...semantic.map((h) => h.id)).all()).results || []).map((r) => r.id));
         semantic = semantic.filter((h) => ok.has(h.id));
       }
     }
@@ -43,7 +45,7 @@ export async function retrieve(env, owner, question, area = '') {
     hits = (await env.DB.prepare(
       `SELECT r.id, r.title, r.transcript, r.summary
          FROM transcript_fts JOIN recordings r ON r.id = transcript_fts.id
-        WHERE transcript_fts MATCH ? AND r.owner = ?${ac.sql}
+        WHERE transcript_fts MATCH ? AND r.owner = ? AND r.hidden = 0${ac.sql}
         ORDER BY rank LIMIT 8`
     ).bind(q, owner, ...ac.binds).all()).results;
   }
@@ -55,7 +57,7 @@ export async function retrieve(env, owner, question, area = '') {
   if (!hits.length) {
     hits = (await env.DB.prepare(
       `SELECT id, title, transcript, summary FROM recordings
-        WHERE owner = ? AND status = 'ready'${areaClause(area).sql}
+        WHERE owner = ? AND status = 'ready' AND hidden = 0${areaClause(area).sql}
         ORDER BY created_at DESC LIMIT 5`
     ).bind(owner, ...areaClause(area).binds).all()).results;
   }

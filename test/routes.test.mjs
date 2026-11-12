@@ -58,6 +58,10 @@ function matcher(where, args) {
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] === v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] !== v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*'([^']*)'$/))) return (r) => r[m[1]] === m[2];
+    if ((m = c.match(/^(?:\w+\.)?(\w+)\s+IN\s*\(([?,\s]+)\)$/i))) { const n = (m[2].match(/\?/g) || []).length; const set = new Set(args.splice(0, n)); return (r) => set.has(r[m[1]]); }
+    // numeric literal (hidden = 0): a row that predates the column counts as 0
+    if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*(\d+)$/))) return (r) => (r[m[1]] ?? 0) === Number(m[2]);
+    if ((m = c.match(/^(\w+)\s+LIKE\s+\?$/i))) { const pat = String(args.shift()).replace(/%/g, ''); return (r) => String(r[m[1]] ?? '').includes(pat); }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*'([^']*)'$/))) return (r) => r[m[1]] !== m[2];
     if ((m = c.match(/^(\w+)\s+IS NOT NULL$/i))) return (r) => r[m[1]] != null;
     throw new Error(`fake D1: unsupported condition: ${cond}`);
@@ -176,7 +180,7 @@ function fakeEnv({
       put: async (k, v) => { audio[k] = v; },
       get: async (k, opts) => (audio[k] == null ? null : {
         body: opts?.range ? toBuf(audio[k]).slice(opts.range.offset, opts.range.offset + opts.range.length) : audio[k],
-        httpMetadata: {}, arrayBuffer: async () => toBuf(audio[k]).slice().buffer,
+        httpMetadata: {}, size: toBuf(audio[k]).length, arrayBuffer: async () => toBuf(audio[k]).slice().buffer,
       }),
       head: async (k) => (audio[k] == null ? null : { size: toBuf(audio[k]).length }),
       delete: async (k) => { delete audio[k]; },
@@ -1010,7 +1014,7 @@ test('summarize stores verified facts (non-verbatim quotes are dropped), and a r
 });
 
 test('GET /api/memory filters by person and kind, is owner-scoped; PATCH ticks; DELETE removes', async () => {
-  const mk = (id, owner, kind, person) => ({ id, owner, recording_id: 'm1', kind, person, text: id, quote: 'q', done: 0, created_at: 1 });
+  const mk = (id, owner, kind, person) => ({ id, owner, recording_id: 'm1', kind, person, text: id, quote: 'q', done: 0, created_at: person ? 1 : Date.now() });
   const { env, store } = fakeEnv({ recordings: [memRec()], facts: [
     mk('f1', ME, 'commitment', 'Ben'), mk('f2', ME, 'decision', null), mk('f3', OTHER, 'decision', 'Ben')] });
   const all = await (await call('/api/memory', {}, env)).json();
@@ -1793,4 +1797,248 @@ test('summarize applies the model\'s area to an automatic recording but never to
   await run('r2', 'health');
   await run('r3', 'nonsense');
   assert.deepEqual(store.recordings.map((r) => r.area), ['health', 'personal', 'work']);
+});
+
+/* --- conversation shaping: trim, split, merge, undo --- */
+import { writeWebm, parseWebm } from '../src/audio/webm.js';
+import { consolidate } from '../src/routes/reshape.js';
+const OPUS = { number: 1, codec: 'A_OPUS', codecPrivate: Uint8Array.from([79, 112, 117, 115, 72, 101, 97, 100, 1, 1, 56, 1, 128, 62, 0, 0, 0, 0, 0]), rate: 48000, channels: 1 };
+const webm = (seconds) => writeWebm(OPUS, Array.from({ length: seconds * 50 }, (_, i) => ({ t: i * 20, dur: 20, data: Uint8Array.from([0x98, i & 255, i >> 8, 1]) }))).data;
+const words = (n) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
+const seg = (start, end, speaker = 'A') => ({ speaker, text: words(20), start, end });
+const SHAPE_ENV = { SPLIT_GAP_MIN: '0.2', TRIM_MIN_SEC: '5' }; // 12 s gap splits, 5 s of dead air trims
+const summaryLlm = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ summary: 'sum', action_items: [], area: 'work' }) } }] }),
+  { status: 200, headers: { 'content-type': 'application/json' } });
+const longRec = (o = {}) => rec({ id: 'p1', status: 'ready', title: 'Long call', created_at: 1_000_000, duration_ms: 60_000, r2_key: 'rec/p1',
+  segments: JSON.stringify([seg(0, 15), seg(40, 55, 'B')]), transcript: 'A: x\n\nB: y', summary: 'old',
+  speakers: JSON.stringify([{ label: 'A', name: 'Sam', confirmed: true }, { label: 'B', name: null, confirmed: false }]), ...o });
+
+test('reshape: a recording with a long silence becomes two, each with its own audio, speakers and summary; the original is hidden', async () => {
+  const { env, store, audio, violations } = fakeEnv({ recordings: [longRec()], audio: { 'rec/p1': webm(60) } });
+  Object.assign(env, SHAPE_ENV);
+  const res = await withFetch(() => call('/api/recordings/p1/reshape', { method: 'POST' }, env), summaryLlm);
+  const out = await res.json();
+  assert.equal(out.changed, true);
+  assert.equal(out.split_into.length, 2);
+  const [a, b] = out.split_into.map((id) => store.recordings.find((r) => r.id === id));
+  assert.equal(store.recordings.find((r) => r.id === 'p1').hidden, 1);
+  assert.deepEqual([a.title, b.title], ['Long call (1/2)', 'Long call (2/2)']);
+  assert.equal(a.status, 'ready'); assert.equal(b.status, 'ready');
+  assert.equal(a.created_at, 1_000_000); // starts where the original did
+  assert.equal(b.created_at, 1_000_000 + 37_000); // second piece begins 3 s before its first word
+  assert.deepEqual(JSON.parse(a.speakers).map((s) => s.label), ['A']);
+  assert.deepEqual(JSON.parse(b.speakers).map((s) => s.label), ['B']);
+  assert.deepEqual(JSON.parse(b.segments).map((s) => [s.start, s.end]), [[3, 18]]); // on its own clock
+  assert.match(a.transcript, /^Sam:/);
+  assert.equal(parseWebm(audio[a.r2_key]).packets.length, 18 * 50); // 0..18 s kept, dead air after speech cut
+  assert.equal(parseWebm(audio[b.r2_key]).packets.length, 23 * 50);
+  assert.ok(audio['rec/p1'], 'the original audio is kept for undo');
+  assert.deepEqual(JSON.parse(a.lineage).from, ['p1']);
+  // hidden originals vanish from the list
+  const list = (await (await call('/api/recordings', {}, env)).json()).recordings.map((r) => r.id).sort();
+  assert.deepEqual(list, out.split_into.slice().sort());
+  assert.deepEqual(violations, []);
+});
+
+test('reshape: dead air at the ends of one conversation is trimmed (one new recording, original hidden)', async () => {
+  const { env, store, audio } = fakeEnv({ recordings: [longRec({ segments: JSON.stringify([seg(20, 40)]) })], audio: { 'rec/p1': webm(60) } });
+  Object.assign(env, SHAPE_ENV);
+  const out = await (await withFetch(() => call('/api/recordings/p1/reshape', { method: 'POST' }, env), summaryLlm)).json();
+  assert.equal(out.split_into.length, 1);
+  const k = store.recordings.find((r) => r.id === out.split_into[0]);
+  assert.equal(k.title, 'Long call'); // not renamed when nothing was split
+  assert.equal(parseWebm(audio[k.r2_key]).packets.length, 26 * 50); // 17 s .. 43 s
+  assert.equal(JSON.parse(k.lineage).kind, 'trim');
+});
+
+test('reshape: a recording with no dead air and no silences is left alone', async () => {
+  const { env, store } = fakeEnv({ recordings: [longRec({ segments: JSON.stringify([seg(0, 30), seg(31, 59)]) })], audio: { 'rec/p1': webm(60) } });
+  Object.assign(env, SHAPE_ENV);
+  assert.deepEqual(await (await call('/api/recordings/p1/reshape', { method: 'POST' }, env)).json(), { changed: false });
+  assert.equal(store.recordings.length, 1);
+});
+
+test('reshape: a transcript-only import (Omi) is split into text pieces; trim alone never touches it', async () => {
+  const omi = longRec({ id: 'o1', r2_key: '', omi_id: 'x', segments: JSON.stringify([seg(0, 15), seg(40, 55, 'B')]) });
+  const { env, store } = fakeEnv({ recordings: [omi] });
+  Object.assign(env, SHAPE_ENV);
+  const out = await (await withFetch(() => call('/api/recordings/o1/reshape', { method: 'POST' }, env), summaryLlm)).json();
+  assert.equal(out.split_into.length, 2);
+  assert.ok(store.recordings.filter((r) => r.lineage).every((r) => r.r2_key === ''));
+  const trimOnly = fakeEnv({ recordings: [longRec({ id: 'o2', r2_key: '', segments: JSON.stringify([seg(20, 40)]) })] });
+  Object.assign(trimOnly.env, SHAPE_ENV);
+  assert.deepEqual(await (await call('/api/recordings/o2/reshape', { method: 'POST' }, trimOnly.env)).json(), { changed: false });
+});
+
+test('undo brings the original back and removes the pieces and their audio', async () => {
+  const { env, store, audio } = fakeEnv({ recordings: [longRec()], audio: { 'rec/p1': webm(60) } });
+  Object.assign(env, SHAPE_ENV);
+  const out = await (await withFetch(() => call('/api/recordings/p1/reshape', { method: 'POST' }, env), summaryLlm)).json();
+  const keys = out.split_into.map((id) => `rec/${id}`);
+  // undo works from the new side...
+  assert.equal((await call(`/api/recordings/${out.split_into[1]}/undo-reshape`, { method: 'POST' }, env)).status, 200);
+  assert.deepEqual(store.recordings.map((r) => [r.id, r.hidden]), [['p1', 0]]);
+  assert.ok(keys.every((k) => !(k in audio)));
+  assert.ok(audio['rec/p1']);
+  // ...and nothing is left to undo afterwards
+  assert.equal((await call('/api/recordings/p1/undo-reshape', { method: 'POST' }, env)).status, 404);
+  // another owner cannot
+  assert.equal((await call('/api/recordings/p1/undo-reshape', { method: 'POST' }, env, OTHER)).status, 404);
+});
+
+const piece = (id, startMs, seconds, o = {}) => rec({ id, status: 'uploaded', src: 'device', created_at: startMs, duration_ms: seconds * 1000, r2_key: `rec/${id}`, content_type: 'audio/webm', title: id, ...o });
+
+test('consolidate joins pieces of one call before transcription and leaves other calls alone', async () => {
+  const t0 = 10_000_000;
+  const { env, store, audio } = fakeEnv({
+    recordings: [piece('a', t0, 20), piece('b', t0 + 21_000, 20), piece('c', t0 + 42_000, 10), piece('far', t0 + 3_600_000, 20)],
+    audio: { 'rec/a': webm(20), 'rec/b': webm(20), 'rec/c': webm(10), 'rec/far': webm(20) },
+  });
+  const moved = await consolidate(env, ME);
+  assert.deepEqual([...moved.keys()].sort(), ['a', 'b', 'c']);
+  const id = moved.get('a');
+  const merged = store.recordings.find((r) => r.id === id);
+  assert.equal(merged.status, 'uploaded');
+  assert.equal(merged.created_at, t0);
+  assert.equal(merged.duration_ms, 50_000);
+  assert.equal(parseWebm(audio[`rec/${id}`]).packets.length, 50 * 50);
+  assert.deepEqual(store.recordings.filter((r) => r.hidden === 1).map((r) => r.id).sort(), ['a', 'b', 'c']);
+  assert.equal(store.recordings.find((r) => r.id === 'far').hidden ?? 0, 0);
+  assert.deepEqual(JSON.parse(merged.lineage).parts.map((p) => p.startMs), [0, 20000, 40000]);
+  // a second pass finds nothing new
+  assert.equal((await consolidate(env, ME)).size, 0);
+});
+
+test('a merged call is processed as one, a hidden piece refuses to be processed, and undo gives the pieces back', async () => {
+  const t0 = 10_000_000;
+  const { env, store } = fakeEnv({
+    recordings: [piece('a', t0, 20), piece('b', t0 + 21_000, 20)],
+    audio: { 'rec/a': webm(20), 'rec/b': webm(20) },
+  });
+  const id = (await consolidate(env, ME)).get('a');
+  assert.equal((await call('/api/recordings/a/process', { method: 'POST' }, env)).status, 409);
+  assert.equal((await call(`/api/recordings/${id}/undo-reshape`, { method: 'POST' }, env)).status, 200);
+  assert.deepEqual(store.recordings.map((r) => [r.id, r.hidden]).sort(), [['a', 0], ['b', 0]]);
+});
+
+test('POST /api/recordings/merge joins recordings you name, even transcribed ones, and validates', async () => {
+  const t0 = 10_000_000;
+  const { env, store } = fakeEnv({
+    recordings: [piece('a', t0, 20, { status: 'ready', src: null }), piece('b', t0 + 900_000, 20, { src: null }), piece('noaudio', t0, 5, { r2_key: '' })],
+    audio: { 'rec/a': webm(20), 'rec/b': webm(20) },
+  });
+  assert.equal((await post('/api/recordings/merge', { ids: ['a'] }, env)).status, 400);
+  assert.equal((await post('/api/recordings/merge', { ids: ['a', 'noaudio'] }, env)).status, 409);
+  assert.equal((await post('/api/recordings/merge', { ids: ['a', 'zzz'] }, env)).status, 404);
+  assert.equal((await post('/api/recordings/merge', { ids: ['a', 'b'] }, env, OTHER)).status, 404);
+  const res = await post('/api/recordings/merge', { ids: ['b', 'a'] }, env);
+  assert.equal(res.status, 200);
+  const newId = (await res.json()).id;
+  const merged = store.recordings.find((r) => r.id === newId);
+  assert.equal(merged.status, 'uploaded');
+  assert.equal(merged.created_at, t0); // oldest first, whatever order the ids came in
+});
+
+test('process() splits an already-transcribed import (Omi) by silence before summarizing, and the first piece is returned', async () => {
+  const omi = longRec({ id: 'o9', status: 'transcribed', r2_key: '', omi_id: 'z', summary: null });
+  const { env, store } = fakeEnv({ recordings: [omi] });
+  Object.assign(env, SHAPE_ENV);
+  const out = await (await withFetch(() => call('/api/recordings/o9/process', { method: 'POST' }, env), summaryLlm)).json();
+  assert.equal(out.split_into.length, 2);
+  assert.equal(out.id, out.split_into[0]);
+  assert.equal(out.status, 'ready');
+  assert.equal(store.recordings.filter((r) => r.lineage && r.status === 'ready').length, 2);
+  assert.equal(store.recordings.find((r) => r.id === 'o9').hidden, 1);
+});
+
+test('RESHAPE=off leaves recordings exactly as they were', async () => {
+  const omi = longRec({ id: 'o8', status: 'transcribed', r2_key: '', omi_id: 'z', summary: null });
+  const { env, store } = fakeEnv({ recordings: [omi] });
+  Object.assign(env, SHAPE_ENV, { RESHAPE: 'off' });
+  const out = await (await withFetch(() => call('/api/recordings/o8/process', { method: 'POST' }, env), summaryLlm)).json();
+  assert.equal(out.split_into, undefined);
+  assert.equal(store.recordings.length, 1);
+  assert.equal(store.recordings[0].status, 'ready');
+});
+
+test('a hidden original cannot be processed again', async () => {
+  const { env } = fakeEnv({ recordings: [longRec({ hidden: 1, status: 'transcribed' })] });
+  assert.equal((await call('/api/recordings/p1/process', { method: 'POST' }, env)).status, 409);
+});
+
+test('deleting the last piece of a split also deletes the hidden original; deleting a hidden original deletes its pieces', async () => {
+  const { env, store, audio } = fakeEnv({ recordings: [longRec()], audio: { 'rec/p1': webm(60) } });
+  Object.assign(env, SHAPE_ENV);
+  const out = await (await withFetch(() => call('/api/recordings/p1/reshape', { method: 'POST' }, env), summaryLlm)).json();
+  const [a, b] = out.split_into;
+  assert.equal((await call(`/api/recordings/${a}`, { method: 'DELETE' }, env)).status, 200);
+  assert.ok(store.recordings.some((r) => r.id === 'p1'), 'a sibling is still there: keep the original');
+  assert.equal((await call(`/api/recordings/${b}`, { method: 'DELETE' }, env)).status, 200);
+  assert.equal(store.recordings.length, 0);
+  assert.deepEqual(Object.keys(audio), []);
+
+  const again = fakeEnv({ recordings: [longRec()], audio: { 'rec/p1': webm(60) } });
+  Object.assign(again.env, SHAPE_ENV);
+  await withFetch(() => call('/api/recordings/p1/reshape', { method: 'POST' }, again.env), summaryLlm);
+  assert.equal((await call('/api/recordings/p1', { method: 'DELETE' }, again.env)).status, 200);
+  assert.equal(again.store.recordings.length, 0);
+  assert.deepEqual(Object.keys(again.audio), []);
+});
+
+test('undo works from a hidden piece of a merge too', async () => {
+  const t0 = 10_000_000;
+  const { env, store } = fakeEnv({ recordings: [piece('a', t0, 20), piece('b', t0 + 21_000, 20)], audio: { 'rec/a': webm(20), 'rec/b': webm(20) } });
+  await consolidate(env, ME);
+  assert.equal((await call('/api/recordings/b/undo-reshape', { method: 'POST' }, env)).status, 200);
+  assert.deepEqual(store.recordings.map((r) => [r.id, r.hidden]).sort(), [['a', 0], ['b', 0]]);
+});
+
+test('undoing a merge of merges unwinds to the original pieces, and they are not joined again', async () => {
+  const t0 = 10_000_000;
+  const { env, store } = fakeEnv({ recordings: [piece('a', t0, 20), piece('b', t0 + 21_000, 20)], audio: { 'rec/a': webm(20), 'rec/b': webm(20), 'rec/c': webm(10) } });
+  await consolidate(env, ME);
+  store.recordings.push(piece('c', t0 + 42_000, 10));
+  const moved = await consolidate(env, ME);
+  const finalId = [...new Set(moved.values())][0];
+  const res = await call(`/api/recordings/${finalId}/undo-reshape`, { method: 'POST' }, env);
+  assert.deepEqual((await res.json()).restored.sort(), ['a', 'b', 'c']);
+  assert.deepEqual(store.recordings.map((r) => [r.id, r.hidden ?? 0]).sort(), [['a', 0], ['b', 0], ['c', 0]]);
+  assert.equal((await consolidate(env, ME)).size, 0);
+});
+
+test('memory: a fact about an unnamed speaker is listed for a week, then leaves the list and the brief but stays stored', async () => {
+  const day = 86400000, now = Date.now();
+  const mk = (id, person, age) => ({ id, owner: ME, recording_id: 'm1', kind: 'decision', person, text: id, quote: 'q', done: 0, created_at: now - age * day });
+  const { env, store } = fakeEnv({ recordings: [memRec({ created_at: now - day })], facts: [
+    mk('named-old', 'Ben', 30), mk('unnamed-new', null, 2), mk('unnamed-old', null, 8), mk('named-new', 'Ben', 1)] });
+  const list = await (await call('/api/memory', {}, env)).json();
+  assert.deepEqual(list.facts.map((f) => f.id).sort(), ['named-new', 'named-old', 'unnamed-new']);
+  assert.equal(list.total_facts, 3);
+  assert.equal(store.facts.length, 4, 'nothing is deleted: the old fact stays for the semantic layer');
+});
+
+test('Ask never cites a recording that was split or joined away, even if the vector index still holds it', async () => {
+  const v = fakeVectors();
+  const { env, store } = fakeEnv({ recordings: [memRec({ id: 'm1' })] });
+  Object.assign(env, { AI: v.AI, VECTORS: v.VECTORS });
+  await withFetch(() => call('/api/recordings/m1/resummarize', { method: 'POST' }, env), llmJson({ summary: 'new', action_items: [], facts: FACTS_JSON }));
+  const ask = () => withFetch(async () => (await post('/api/ask', { question: 'who sends the contract' }, env)).json(), async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: 'ANSWER' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  assert.deepEqual((await ask()).sources.map((s) => s.title), ['Planning']);
+  store.recordings.find((r) => r.id === 'm1').hidden = 1; // the index is eventually consistent: its vectors are still there
+  const out = await ask();
+  assert.deepEqual(out.sources, []);
+});
+
+test("the daily brief is written from the computed open commitments, in the fixed sections, weighted to the last days", async () => {
+  const items = [{ task: 'Send the contract', owner: 'Jeff', due: '2026-11-05' }, { task: 'Review budget', owner: 'Ben', due: null }, { task: 'Book venue', owner: 'Jeff', due: '2026-11-11' }];
+  const { env } = fakeEnv({ recordings: [rec({ id: 'b1', status: 'ready', title: 'Planning', created_at: Date.parse('2026-11-09T10:00:00Z'), summary: 's', transcript: 't', speakers: '[]', action_items: JSON.stringify(items) })] });
+  const calls = [];
+  await withFetch(() => post('/api/today/brief', { kind: 'today', date: '2026-11-11', me: 'Jeff Eberhard' }, env), llmOk(calls));
+  const user = calls[0].messages[1].content;
+  assert.match(user, /authoritative/);
+  assert.match(user, /Overdue \(1\):\n- Send the contract \(Jeff\) due 2026-11-05/);
+  assert.match(user, /Due today \(1\):\n- Book venue/);
+  assert.match(user, /Waiting on others \(1\):\n- Review budget \(Ben\)/);
+  for (const h of ['## Do first', '## Due and overdue', '## Waiting on others', '## Decide today', '## People', '## Since yesterday']) assert.ok(user.includes(h), h);
 });

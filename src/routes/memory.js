@@ -7,7 +7,7 @@ import { readRow } from '../db.js';
 import { llmFetch } from '../llm.js';
 import { defaultModel, contextChars } from '../config.js';
 import { parseJsonLoose } from '../text.js';
-import { normalizeFacts, factsSystemPrompt, FACT_KINDS } from '../memory.js';
+import { normalizeFacts, factsSystemPrompt, FACT_KINDS, isListedFact } from '../memory.js';
 import { indexRecording, vectorsEnabled } from '../vectors.js';
 
 const BACKFILL_PER_CALL = 2; // each recording costs ~3 subrequests; stay far inside the free plan's 50
@@ -60,7 +60,7 @@ async function memorize(env, owner, rec) {
 // Ready recordings that still need work, newest first. Light columns only (no transcripts).
 async function pending(env, owner) {
   const rows = (await env.DB.prepare(
-    "SELECT id, facts_at, vec_chunks FROM recordings WHERE owner = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 2000"
+    "SELECT id, facts_at, vec_chunks FROM recordings WHERE owner = ? AND status = 'ready' AND hidden = 0 ORDER BY created_at DESC LIMIT 2000"
   ).bind(owner).all()).results || [];
   const vec = vectorsEnabled(env);
   return {
@@ -96,10 +96,11 @@ export async function listMemory(request, env, owner) {
   const person = (u.searchParams.get('person') || '').trim().toLowerCase();
   const kind = u.searchParams.get('kind') || '';
   const ac = areaClause(u.searchParams.get('area'), 'r.area');
-  const rows = (await env.DB.prepare(
+  const now = Date.now();
+  const rows = ((await env.DB.prepare(
     `SELECT f.id, f.recording_id, f.kind, f.person, f.text, f.quote, f.done, f.created_at FROM facts f
        ${ac.sql ? 'JOIN recordings r ON r.id = f.recording_id' : ''} WHERE f.owner = ?${ac.sql} ORDER BY f.created_at DESC LIMIT 1000`
-  ).bind(owner, ...ac.binds).all()).results || [];
+  ).bind(owner, ...ac.binds).all()).results || []).filter((f) => isListedFact(f, now)); // untagged and older than a week: kept and searchable, just not listed
   const titles = new Map(((await env.DB.prepare('SELECT id, title FROM recordings WHERE owner = ?').bind(owner).all()).results || [])
     .map((r) => [r.id, r.title]));
   const facts = rows
