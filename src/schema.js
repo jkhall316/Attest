@@ -77,6 +77,13 @@ export const MIGRATIONS = [
     'ALTER TABLE recordings ADD COLUMN ingest_id TEXT',
     'CREATE UNIQUE INDEX IF NOT EXISTS recordings_ingest ON recordings (owner, ingest_id)',
   ] },
+  // Areas (#5): work / personal / health / learning. area_source is 'auto' (inferred from the
+  // template, then the content) or 'manual' (a person chose it; never overwritten automatically).
+  { id: 11, sql: [
+    "ALTER TABLE recordings ADD COLUMN area TEXT NOT NULL DEFAULT 'work'",
+    "ALTER TABLE recordings ADD COLUMN area_source TEXT NOT NULL DEFAULT 'auto'",
+    'CREATE INDEX IF NOT EXISTS recordings_owner_area ON recordings (owner, area, created_at DESC)',
+  ] },
 ];
 
 // Applies every migration not yet recorded. `db` is a D1 binding (or anything with the

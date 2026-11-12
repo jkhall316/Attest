@@ -3,6 +3,7 @@
 import { ftsQuery, parseJsonLoose } from '../text.js';
 import { defaultModel } from '../config.js';
 import { llmFetch } from '../llm.js';
+import { areaClause, normalizeArea } from '../areas.js';
 import { vectorsEnabled, semanticChunks, chunksToHits } from '../vectors.js';
 
 /* --- #3 deep research --- */
@@ -16,12 +17,23 @@ export const MAX_MODEL_CALLS = 2; // decompose + synthesize; retrieval is plain 
 
 // Keyword retrieval, split out of ask() so chat threads (#2) can run it once per
 // turn and feed the same hits into answer() alongside prior conversation turns.
-export async function retrieve(env, owner, question) {
+export async function retrieve(env, owner, question, area = '') {
+  const ac = areaClause(area, 'r.area');
+  const inArea = normalizeArea(area);
   // Meaning first when the vector index exists (only the matching passages go to the model,
   // which is also cheaper); keyword hits top it up. Any vector failure falls back to keywords.
   let semantic = [];
   if (vectorsEnabled(env)) {
-    try { semantic = chunksToHits(await semanticChunks(env, owner, question)); }
+    try {
+      semantic = chunksToHits(await semanticChunks(env, owner, question));
+      // The index knows nothing about areas, so keep only hits whose recording is in the chosen one.
+      if (inArea && semantic.length) {
+        const ok = new Set(((await env.DB.prepare(
+          `SELECT id FROM recordings WHERE owner = ? AND area = ? AND id IN (${semantic.map(() => '?').join(',')})`
+        ).bind(owner, inArea, ...semantic.map((h) => h.id)).all()).results || []).map((r) => r.id));
+        semantic = semantic.filter((h) => ok.has(h.id));
+      }
+    }
     catch (e) { console.error('semantic search failed, using keywords:', e?.message || e); }
     if (semantic.length >= 4) return semantic;
   }
@@ -31,9 +43,9 @@ export async function retrieve(env, owner, question) {
     hits = (await env.DB.prepare(
       `SELECT r.id, r.title, r.transcript, r.summary
          FROM transcript_fts JOIN recordings r ON r.id = transcript_fts.id
-        WHERE transcript_fts MATCH ? AND r.owner = ?
+        WHERE transcript_fts MATCH ? AND r.owner = ?${ac.sql}
         ORDER BY rank LIMIT 8`
-    ).bind(q, owner).all()).results;
+    ).bind(q, owner, ...ac.binds).all()).results;
   }
   if (semantic.length) {
     const have = new Set(semantic.map((h) => h.id));
@@ -43,9 +55,9 @@ export async function retrieve(env, owner, question) {
   if (!hits.length) {
     hits = (await env.DB.prepare(
       `SELECT id, title, transcript, summary FROM recordings
-        WHERE owner = ? AND status = 'ready'
+        WHERE owner = ? AND status = 'ready'${areaClause(area).sql}
         ORDER BY created_at DESC LIMIT 5`
-    ).bind(owner).all()).results;
+    ).bind(owner, ...areaClause(area).binds).all()).results;
   }
   return hits;
 }
@@ -102,8 +114,8 @@ export async function answer(env, hits, question, history = []) {
 }
 
 // Stateless /api/ask back-compat wrapper (#2 added chat threads, this stays as-is).
-export async function ask(env, owner, question) {
-  return answer(env, await retrieve(env, owner, question), question);
+export async function ask(env, owner, question, area = '') {
+  return answer(env, await retrieve(env, owner, question, area), question);
 }
 
 /* --- #3 deep research --- */
@@ -125,7 +137,7 @@ export function mergeHits(hitLists, cap) {
 
 // Pass 1 (decompose) and pass 3 (synthesize) are model calls; pass 2 (retrieve) is plain
 // FTS5 lookups -- so MAX_MODEL_CALLS is 2 and `model_calls` reports what actually ran.
-export async function deepResearch(env, owner, question, history = []) {
+export async function deepResearch(env, owner, question, history = [], area = '') {
   const decomposeRaw = await completion(env, [
     { role: 'system', content: `Split the user's question into up to ${MAX_SUB_QUESTIONS} standalone sub-questions whose answers together cover it (resolve pronouns and references using the prior conversation, if any). Respond with JSON {"sub_questions": ["..."]}.` },
     ...history.slice(-4),
@@ -141,7 +153,7 @@ export async function deepResearch(env, owner, question, history = []) {
     .slice(0, MAX_SUB_QUESTIONS);
   if (!sub_questions.length) sub_questions = [question];
 
-  const hitLists = await Promise.all(sub_questions.map((q) => retrieve(env, owner, q)));
+  const hitLists = await Promise.all(sub_questions.map((q) => retrieve(env, owner, q, area)));
   const hits = mergeHits(hitLists, MAX_HITS);
 
   if (!hits.length) {

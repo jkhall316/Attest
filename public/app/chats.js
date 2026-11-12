@@ -1,5 +1,6 @@
 // Ask threads (#2): thread list lives in lists.js, this is the conversation view.
 
+import { getArea } from './scope.js';
 import { $, esc, md } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -111,7 +112,7 @@ async function sendChatMessage(chatId) {
   try {
     const { messages, sub_questions } = await api(`/chats/${chatId}/messages`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ question: q, mode: deep ? 'deep' : undefined }),
+      body: JSON.stringify({ question: q, mode: deep ? 'deep' : undefined, area: getArea() || undefined }),
     });
     $('chat-researching')?.remove();
     renderChatMessages(messages, sub_questions);

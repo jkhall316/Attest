@@ -1721,3 +1721,76 @@ test('Access service tokens: a verified token acts as the owner, but only to upl
 
   assert.equal((await call('/api/meta', { headers: { 'cf-access-jwt-assertion': good } }, { ...env, ACCESS_AUD: '' }, null)).status, 401, 'off without ACCESS_AUD');
 });
+
+/* --- #5 areas --- */
+const areaRec = (id, area, extra = {}) => ({ id, owner: ME, title: id, created_at: 1, status: 'ready', template: 'meeting', area, area_source: 'auto', ...extra });
+
+test('live start infers the area from the template, and an explicit area wins as manual', async () => {
+  const { env, store } = fakeEnv();
+  await post('/api/recordings/live', { title: 'a', template: 'journal' }, env);
+  await post('/api/recordings/live', { title: 'b', template: 'journal', area: 'health' }, env);
+  await post('/api/recordings/live', { title: 'c' }, env);
+  assert.deepEqual(store.recordings.map((r) => [r.area, r.area_source]), [['personal', 'auto'], ['health', 'manual'], ['work', 'auto']]);
+});
+
+test('GET /api/recordings?area= filters, and no/unknown area returns everything', async () => {
+  const { env, violations } = fakeEnv({ recordings: [areaRec('w', 'work'), areaRec('p', 'personal'), areaRec('h', 'health')] });
+  const ids = async (q) => (await (await call(`/api/recordings${q}`, {}, env)).json()).recordings.map((r) => r.id).sort();
+  assert.deepEqual(await ids('?area=personal'), ['p']);
+  assert.deepEqual(await ids('?area=health'), ['h']);
+  assert.deepEqual(await ids(''), ['h', 'p', 'w']);
+  assert.deepEqual(await ids('?area=all'), ['h', 'p', 'w']);
+  assert.deepEqual(violations, []);
+});
+
+test('PATCH /:id/area sets a manual area, rejects junk, is owner-scoped, and auto hands it back', async () => {
+  const { env, store } = fakeEnv({ recordings: [areaRec('r1', 'work', { template: 'journal' })] });
+  const patch = (id, body, owner) => call(`/api/recordings/${id}/area`, { method: 'PATCH', body: JSON.stringify(body) }, env, owner);
+  assert.equal((await patch('r1', { area: 'nope' })).status, 400);
+  assert.equal((await patch('r1', { area: 'health' }, OTHER)).status, 404);
+  assert.deepEqual(await (await patch('r1', { area: 'health' })).json(), { ok: true, area: 'health', area_source: 'manual' });
+  assert.deepEqual([store.recordings[0].area, store.recordings[0].area_source], ['health', 'manual']);
+  assert.deepEqual(await (await patch('r1', { area: 'auto' })).json(), { ok: true, area: 'personal', area_source: 'auto' });
+});
+
+test('POST /api/recordings/areas/backfill re-derives automatic areas from templates and leaves manual ones', async () => {
+  const { env, store } = fakeEnv({ recordings: [
+    areaRec('a', 'work', { template: 'journal' }),
+    areaRec('b', 'work', { template: 'journal', area_source: 'manual' }),
+    areaRec('c', 'work', { template: 'meeting' }),
+    areaRec('d', 'work', { template: 'custom-x' }),
+  ] });
+  const out = await (await call('/api/recordings/areas/backfill', { method: 'POST' }, env)).json();
+  assert.equal(out.updated, 1);
+  assert.deepEqual(store.recordings.map((r) => r.area), ['personal', 'work', 'work', 'work']);
+});
+
+test('today only counts the chosen area, and its cached brief is keyed per area', async () => {
+  const { env, store } = fakeEnv({ recordings: [
+    areaRec('w', 'work', { action_items: JSON.stringify([{ task: 'ship', owner: 'me', due: null }]) }),
+    areaRec('p', 'personal', { action_items: JSON.stringify([{ task: 'milk', owner: 'me', due: null }, { task: 'eggs', owner: 'me', due: null }]) }),
+  ] });
+  store.briefs.push({ owner: ME, kind: 'today', period: '2026-11-11', content: 'ALL', created_at: Date.now() },
+    { owner: ME, kind: 'today', period: '2026-11-11|personal', content: 'PERSONAL', created_at: Date.now() });
+  const get = async (q) => (await call(`/api/today?date=2026-11-11${q}`, {}, env)).json();
+  assert.equal((await get('')).open_count, 3);
+  const p = await get('&area=personal');
+  assert.equal(p.open_count, 2);
+  assert.equal(p.brief.content, 'PERSONAL');
+  assert.equal(p.area, 'personal');
+  assert.equal((await get('')).brief.content, 'ALL');
+});
+
+test('summarize applies the model\'s area to an automatic recording but never to a manual one', async () => {
+  const { env, store } = fakeEnv({ recordings: [
+    speakerRec({ id: 'r1', summary: 'old', area: 'work', area_source: 'auto' }),
+    speakerRec({ id: 'r2', summary: 'old', area: 'personal', area_source: 'manual' }),
+    speakerRec({ id: 'r3', summary: 'old', area: 'work', area_source: 'auto' }),
+  ] });
+  const run = (id, area) => withFetch(() => call(`/api/recordings/${id}/resummarize`, { method: 'POST' }, env),
+    llmJson({ summary: 's', action_items: [], area }));
+  await run('r1', 'health');
+  await run('r2', 'health');
+  await run('r3', 'nonsense');
+  assert.deepEqual(store.recordings.map((r) => r.area), ['health', 'personal', 'work']);
+});

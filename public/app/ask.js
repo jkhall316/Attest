@@ -1,5 +1,6 @@
 // The per-recording "Ask Attest" panel. Stateless: no thread, no persistence.
 
+import { getArea } from './scope.js';
 import { $, esc, md } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -25,7 +26,7 @@ export async function doAsk() {
   try {
     const { answer, sources, sub_questions } = await api('/ask', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ question: q, mode: deep ? 'deep' : undefined }),
+      body: JSON.stringify({ question: q, mode: deep ? 'deep' : undefined, area: getArea() || undefined }),
     });
     out.innerHTML = `<div class="md">${md(answer)}</div>` +
       (sub_questions?.length ? `<div class="muted" style="margin-top:10px">Searched for: ${sub_questions.map(esc).join(' · ')}</div>` : '') +

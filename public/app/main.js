@@ -14,6 +14,7 @@ import { fillSelects, wireSettings } from './settings.js';
 import { showToday } from './today.js';
 import { wirePalette } from './palette.js';
 import { wirePersona } from './persona.js';
+import { wireScope, areaQuery } from './scope.js';
 
 (async () => {
   state.META = await api('/meta');
@@ -27,8 +28,8 @@ import { wirePersona } from './persona.js';
   $('rec').onclick = startStop;
   $('file').onchange = (e) => e.target.files[0] && submit(e.target.files[0]);
   renderSources(state.META.sources);
-  $('export-all').onclick = () => location.href = '/api/export';
-  $('export-zip').onclick = () => location.href = '/api/export?format=zip';
+  $('export-all').onclick = () => location.href = '/api/export' + areaQuery();
+  $('export-zip').onclick = () => location.href = '/api/export?format=zip' + areaQuery('&');
 
   $('list').onclick = (e) => {
     const card = e.target.closest('.card');
@@ -36,6 +37,13 @@ import { wirePersona } from './persona.js';
   };
   wirePalette();
   wirePersona();
+  // Changing the area reloads the sidebar and whichever top-level screen is showing. A recording
+  // that is open stays open (it belongs to whatever area it is in).
+  wireScope(async () => {
+    await refresh();
+    if (state.current) return;
+    if (state.screen === 'ask') showAsk(); else showToday();
+  });
   $('home').onclick = showToday;
   $('brand').onclick = showToday;
   $('nav-ask').onclick = showAsk;

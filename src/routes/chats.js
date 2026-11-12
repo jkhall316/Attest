@@ -49,7 +49,7 @@ export async function deleteChat(env, id, owner) {
 export async function postChatMessage(request, env, owner, chatId) {
   const chat = await env.DB.prepare('SELECT * FROM chats WHERE id = ? AND owner = ?').bind(chatId, owner).first();
   if (!chat) return fail('not found', 404);
-  const { question, mode } = await request.json().catch(() => ({}));
+  const { question, mode, area } = await request.json().catch(() => ({}));
   if (!question || typeof question !== 'string') return fail('question required');
 
   const prior = (await env.DB.prepare(
@@ -73,8 +73,8 @@ export async function postChatMessage(request, env, owner, chatId) {
   let result;
   try {
     result = mode === 'deep'
-      ? await deepResearch(env, owner, question, historyToMessages(prior))
-      : await answer(env, await retrieve(env, owner, question), question, historyToMessages(prior));
+      ? await deepResearch(env, owner, question, historyToMessages(prior), area)
+      : await answer(env, await retrieve(env, owner, question, area), question, historyToMessages(prior));
   } catch (e) {
     // Do not leave a dangling user turn: the thread would show a question with no
     // reply, and the next turn's history would carry it as unanswered context.

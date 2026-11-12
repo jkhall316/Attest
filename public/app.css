@@ -106,6 +106,7 @@ h3, .eyebrow { font-size:11px; line-height:1.4; font-weight:650; letter-spacing:
 
 /* ---------- header: command button + persona ---------- */
 .cmdbtn { gap:8px; color:var(--text-secondary); padding:6px 10px 6px 12px; min-width:190px; justify-content:space-between; font-size:13px }
+.scope { width:auto; padding:5px 26px 5px 10px; border-radius:999px; font-size:13px }
 .persona { gap:8px; padding:4px 10px 4px 4px; border-radius:999px; font-size:13px }
 .persona .who { display:flex; flex-direction:column; line-height:1.15; text-align:left }
 .persona .who small { font-size:10px; color:var(--text-muted); letter-spacing:.03em }
@@ -307,7 +308,7 @@ dialog textarea, dialog input:not([type=checkbox]), dialog select { width:100% }
   main { padding:16px calc(16px + var(--safe-r)) 48px calc(16px + var(--safe-l)); overflow:visible } body > header { padding:var(--safe-t) calc(10px + var(--safe-r)) 0 calc(12px + var(--safe-l)) }
   .side-toggle { display:none } body.side-collapsed .wrap { grid-template-columns:minmax(0,1fr) } body.side-collapsed aside { visibility:visible }
   .tx-row { grid-template-columns:1fr; gap:6px } .bubble { max-width:92% } .talk-row { grid-template-columns:1fr }
-  .cmdbtn { min-width:0 } .persona .who { display:none }
+  .cmdbtn { min-width:0 } .scope { max-width:110px } .persona .who { display:none }
   /* People rows and merge suggestions: name on its own line, actions underneath (a single flex line squeezed the name to one letter per line). */
   #people-list .task { flex-wrap:wrap }
   #people-list .task .body { flex:1 1 100% }

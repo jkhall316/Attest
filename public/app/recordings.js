@@ -6,6 +6,7 @@ import { state } from './state.js';
 import { refresh, refreshChats } from './lists.js';
 import { doAsk, deepToggle, deepHint, wireDeep } from './ask.js';
 import { getMe, isMe } from './me.js';
+import { AREAS } from './scope.js';
 import { icon } from './icons.js';
 import { friendlyModel, sections, iconForSection, avatarStyle, displayNames, initials } from './format.js';
 import { playerHtml, wirePlayer, clearTicks } from './player.js';
@@ -166,6 +167,8 @@ export function render(r) {
     <div class="row" style="margin-top:8px;gap:6px">
       <span class="pill">${icon('calendar', 12)} ${esc(new Date(r.created_at).toLocaleString())}</span>
       <span class="pill">${esc(state.TPL?.[r.template]?.label || r.template)}</span>
+      <select id="area-pick" class="scope" title="${r.area_source === 'manual' ? 'Area you chose' : 'Area picked automatically. Change it and it stays put.'}" aria-label="Area">${AREAS.map(([k, l]) => `<option value="${k}"${k === r.area ? ' selected' : ''}>${l}</option>`).join('')}${r.area_source === 'manual' ? '<option value="auto">Auto-pick again</option>' : ''}</select>
+      ${r.area_source === 'manual' ? '' : '<span class="muted" style="font-size:11px">auto</span>'}
       ${r.model ? `<span class="pill model" title="${esc(r.model)}">${esc(friendlyModel(r.model))}</span>` : ''}
       ${r.tokens_in ? `<span class="pill" title="Input plus output tokens">${r.tokens_in + (r.tokens_out || 0)} tokens</span>` : ''}
     </div>
@@ -257,6 +260,17 @@ export function render(r) {
       $('resum').disabled = false;
       $('vm-status').textContent = e.message;
     }
+  };
+  // Changing the area is sticky (the server marks it manual); "Auto-pick again" hands it back.
+  $('area-pick').onchange = async (e) => {
+    try {
+      const out = await api(`/recordings/${r.id}/area`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ area: e.target.value }),
+      });
+      r.area = out.area; r.area_source = out.area_source;
+      await refresh();
+      render(r);
+    } catch (err) { alert(err.message); }
   };
   $('del').onclick = async () => {
     if (!confirm('Delete this recording and its audio?')) return;

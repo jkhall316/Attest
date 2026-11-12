@@ -40,6 +40,7 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 | | What you get | Needs | Details |
 |---|---|---|---|
 | **Record, upload, import** | Browser recorder with live preview and crash recovery, file upload, Pocket import, Omi import | nothing extra (Pocket and Omi need a key) | [Recording](#recording-uploading-importing) |
+| **Areas** | Every recording is tagged Work, Personal, Health or Learning, picked for you and changeable; a header filter limits the lists, Today, Ask, memory and export to one area | nothing | [Areas](#areas-work-personal-health-learning) |
 | **Devices you choose** | Tick the ones you use (the app, Pocket, Omi, a Limitless pendant); the main screen, setup and background sync follow your choice | nothing | [Choosing your devices](#choosing-your-devices) |
 | **Phone and Mac app** | Attest in a native shell, a bottom tab bar on phones, and a **Bluetooth pendant sync** with background upload on iPhone | an Apple developer account to run it on your phone | [apple/README.md](apple/README.md) |
 | **Speaker labels** | Who said what, from OpenAI's diarize model or OpenRouter models that label speakers | a labeling transcriber | [Speakers and voices](#speakers-and-voices) |
@@ -333,11 +334,22 @@ Speech models invent text over silence and room noise: "Thank you." repeated doz
 - **Command palette.** Press **Cmd/Ctrl+K** (or click the search button in the header) from anywhere: type a question and press Enter to ask Attest, or jump to Today, Ask & chats, Settings, any recording, or one of the ten prompts. The **Deep reasoning** chip changes how the question is asked; hover it for what it means.
 - **On a phone** (under 760 px wide, or inside the Attest app) the sidebar becomes a small bottom bar: **Home** (Today), **Ask**, a raised **Record** button, **Recordings** (the list, import buttons and recorder), and **Settings**. Opening a recording shows it full screen. People rows wrap so names and the Rename and Merge controls fit.
 - **Speaking as.** The chip at the top right is you. Pick yourself from the people Attest knows, or type a name.
+- **Area filter.** The dropdown beside it limits everything to one [area](#areas-work-personal-health-learning), or shows **All areas**.
 - **Sidebar.** Recordings are grouped Today, Yesterday, Last 7 days and Earlier, each with its duration, who spoke, and a Ready / Processing / Failed status. **Record** pulses (and follows your mic level) while recording. The transcription and summary models sit in a collapsible "Recording options" row, shown as friendly names ("GPT-OSS 20B", "MAI Transcribe 2") with the exact model id in the tooltip.
 - **Audio player.** Play and pause, back and forward 15 seconds, 1x / 1.25x / 1.5x / 2x speed, and a seek bar that shows what has loaded and previews the time as you hover. The server answers HTTP range requests, so jumping anywhere does not download the whole file first.
 - **Transcript.** A conversation: avatar, name and a timestamp chip on the left, what they said on the right. Click a timestamp to play from there; the line being spoken highlights as audio plays (turn **Follow audio** off to stop it scrolling). Search highlights matches live, and **Only matches** hides the rest. Recordings without speaker timing show plain text.
 - **Notes.** Briefs and summaries with headings split into collapsible, icon-tagged sections (commitments, dependencies, decisions and so on). Action items show an owner tag and a due-date tag (red once overdue), and a finished item stays readable.
 - **Talk balance.** One split bar for the whole conversation, then each speaker's share, turns, questions, longest turn and cut-ins.
+
+### Areas: work, personal, health, learning
+
+Every recording belongs to one of four areas, so a work life and a home life do not blur together.
+
+- **Picked for you.** A new recording starts in the area its summary style implies (Meeting, Standup and Sales calls are Work; Journal and Voice memo are Personal; Medical visit and similar are Health; Lecture and Research styles are Learning). When the summary is written, the model also reads the content and may move it, so a doctor's visit recorded with the plain Meeting style ends up in Health. Imports from Pocket, Omi and the pendant app are classified the same way once processed.
+- **Change it any time.** Use the area dropdown on the recording page. A choice you make stays put: reprocessing and re-summarizing never overwrite it. Pick **Auto-pick again** to hand it back.
+- **Filter everything.** The **All areas / Work / Personal / Health / Learning** dropdown in the header (saved in your browser) limits the sidebar, command palette, Today (open items and the daily and weekly briefs, each cached per area), prompts, Ask and chats, memory, the People counts and exports. While a filter is on, a new recording is tagged with that area.
+- **Recordings from before this existed** are all Work. Run `POST /api/recordings/areas/backfill` once to re-derive each automatic one from its summary style; anything you chose by hand is left alone.
+- **API.** `GET /api/recordings`, `/api/today`, `/api/memory`, `/api/people` and `/api/export` take `?area=<work|personal|health|learning>`; `POST /api/ask`, `/api/chats/:id/messages`, `/api/today/brief` and `/api/insight` take `area` in the body; a missing or unknown value means all. Uploads (`POST /api/recordings`, form field `area`) and `POST /api/recordings/live` (JSON field `area`) accept an explicit area. `PATCH /api/recordings/:id/area {area}` sets one (`"auto"` hands it back).
 
 ### Summaries and mind maps
 

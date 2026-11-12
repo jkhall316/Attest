@@ -51,7 +51,7 @@ globalThis.fetch = async (url) => {
 };
 
 test('every frontend module imports cleanly', async () => {
-  for (const m of ['dom', 'state', 'api', 'lists', 'ask', 'recordings', 'chats', 'recorder', 'templates', 'voiceprints', 'settings', 'voiceembed', 'voicematch', 'prompts', 'today']) {
+  for (const m of ['dom', 'state', 'api', 'lists', 'ask', 'recordings', 'chats', 'recorder', 'templates', 'voiceprints', 'settings', 'voiceembed', 'voicematch', 'prompts', 'today', 'scope']) {
     const mod = await import(`../public/app/${m}.js`);
     assert.ok(Object.keys(mod).length > 0, `${m}.js exported nothing`);
   }
@@ -858,4 +858,38 @@ test('talk balance gives each speaker an accessible progress bar', async () => {
   const talk = renderTalk([{ name: 'Jeff', share: 0.75, turns: 3, questions: 0, longest_s: 5, overlaps: 0 }]);
   assert.match(talk, /role="progressbar"[^>]*aria-valuenow="75"/);
   assert.match(talk, /width:75%/);
+});
+
+test('area scope: stored per browser, ignores junk, and builds the query the API expects', async () => {
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  try {
+    const { getArea, setArea, areaQuery, areaLabel, AREAS } = await import('../public/app/scope.js');
+    assert.equal(getArea(), '');
+    assert.equal(areaQuery(), '');
+    setArea('health');
+    assert.equal(getArea(), 'health');
+    assert.equal(areaQuery(), '?area=health');
+    assert.equal(areaQuery('&'), '&area=health');
+    setArea('bogus');
+    assert.equal(getArea(), '');
+    store.set('attest.area', 'nope');
+    assert.equal(getArea(), '');
+    assert.deepEqual(AREAS.map(([k]) => k), ['work', 'personal', 'health', 'learning']);
+    assert.equal(areaLabel('learning'), 'Learning');
+  } finally { delete globalThis.localStorage; }
+});
+
+test('the recording page offers an area picker with the current area selected', async () => {
+  const { render } = await import('../public/app/recordings.js');
+  const base = { id: 'r1', title: 'T', created_at: 1, status: 'ready', template: 'meeting', has_audio: false, summary: 's', action_items: [], speakers: [], transcript: 't', segments: null, mindmaps: null, unanswered: [] };
+  render({ ...base, area: 'health', area_source: 'auto' });
+  let html = elements.get('main').innerHTML;
+  assert.match(html, /id="area-pick"/);
+  assert.match(html, /<option value="health" selected>/);
+  assert.doesNotMatch(html, /Auto-pick again/);
+  render({ ...base, area: 'personal', area_source: 'manual' });
+  html = elements.get('main').innerHTML;
+  assert.match(html, /<option value="personal" selected>/);
+  assert.match(html, /Auto-pick again/);
 });
