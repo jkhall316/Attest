@@ -69,8 +69,12 @@ flowchart LR
   M --> C3["Hosted chat model: summary, action items,<br/>mind maps, unanswered, facts"]
   C3 --> C4[("D1 + R2 + Vectorize<br/>in your Cloudflare account")]
 
-  S -->|"Your Mac"| L1["Record or upload"]
-  L1 --> L2["Local Whisper (oMLX)<br/>transcribes with timestamps"]
+  S -->|"Your computer"| L0{"Mac or<br/>Windows?"}
+  L0 -->|"Mac (Apple Silicon)"| LM["oMLX: one server for<br/>chat, embeddings and Whisper"]
+  L0 -->|"Windows (tested) or Linux"| LW["Ollama or LM Studio for chat + embeddings,<br/>plus Speaches (Whisper) for transcription"]
+  LM --> L1["Record or upload"]
+  LW --> L1
+  L1 --> L2["Local Whisper transcribes<br/>with timestamps"]
   L2 --> L3["Your browser works out who spoke<br/>by clustering voices"]
   L3 --> M2["Match enrolled voices<br/>in your browser"]
   M2 --> L4["Local chat model: summary, action items,<br/>mind maps, unanswered, facts"]
@@ -84,11 +88,15 @@ flowchart LR
 
 **On Cloudflare**, everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket and Omi imports (the ones you ticked) and builds memory for older recordings. Start at [Route A](#route-a-cloudflare--openrouter).
 
-**On your Mac**, the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to a model server on your machine. Nothing leaves it, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only).
+**On your own computer** (a Mac, or a Windows PC; Linux should work but is untried), the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to model servers on your machine: oMLX on a Mac, or Ollama (or LM Studio) plus Speaches on Windows. The Windows path has been run end to end on Windows 11 with Ollama and Speaches; LM Studio, whisper.cpp, Linux and deploying to Cloudflare *from* Windows have not been tried yet. Nothing leaves your computer, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only), or [Windows or Linux](#run-it-locally-on-windows-or-linux).
 
 Details for both are in [For developers](#for-developers).
 
 ## Quick start
+
+> **New here? Follow [SETUP.md](SETUP.md).** It is a complete, step-by-step guide for every route, written for someone who has never used a terminal, with a "you should see…" check after each step and a fix for each common problem.
+>
+> **The short version of our advice: use Route A (Cloudflare + OpenRouter) and accept every default.** It is the one that is simplest to keep working, works from your phone, and processes recordings while you sleep. Choose a local route only if keeping everything off the internet matters more than convenience.
 
 **Pick one route.** Both give you the same app; they differ in where it runs and what it costs.
 
