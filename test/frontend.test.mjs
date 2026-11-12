@@ -893,3 +893,20 @@ test('the recording page offers an area picker with the current area selected', 
   assert.match(html, /<option value="personal" selected>/);
   assert.match(html, /Auto-pick again/);
 });
+
+test('a recording made by shaping says so and offers undo; a hidden original offers to come back', async () => {
+  const { render } = await import('../public/app/recordings.js');
+  const base = { id: 'r1', title: 'T', created_at: 1, status: 'ready', template: 'meeting', has_audio: true, summary: 's', action_items: [], speakers: [], transcript: 't', segments: null, mindmaps: null, unanswered: [], area: 'work', area_source: 'auto' };
+  render({ ...base, lineage: { kind: 'split', from: ['x'], part: 2, of: 3, audio: true } });
+  let html = elements.get('main').innerHTML;
+  assert.match(html, /Part 2 of 3/);
+  assert.match(html, /id="undo-shape"/);
+  render({ ...base, lineage: { kind: 'split', from: ['x'], part: 1, of: 2, audio: false } });
+  assert.match(elements.get('main').innerHTML, /sound stays on the original/);
+  render({ ...base, hidden: true });
+  html = elements.get('main').innerHTML;
+  assert.match(html, /Undo and bring it back/);
+  assert.doesNotMatch(html, /id="reshape"/);
+  render({ ...base, segments: [{ speaker: 'A', text: 'hi', start: 0, end: 1 }, { speaker: 'B', text: 'yo', start: 1, end: 2 }] });
+  assert.match(elements.get('main').innerHTML, /id="reshape"/);
+});

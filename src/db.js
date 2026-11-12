@@ -18,6 +18,8 @@ export async function readRow(env, id, owner) {
     speakers: safeParse(r.speakers) || [], // [{label,name,evidence,confirmed}] (#4)
     voice_match: safeParse(r.voice_match), // {model, at, scores} or null (#24)
     unanswered: safeParse(r.unanswered) || [],
+    lineage: safeParse(r.lineage), // {kind: trim|split|merge, from: [ids], ...} on a recording made by shaping
+    hidden: Boolean(r.hidden),
     talk_stats: talkStats(safeParse(r.segments), safeParse(r.speakers) || []),
   };
 }

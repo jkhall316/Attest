@@ -91,33 +91,41 @@ export async function process(r, { force = false } = {}) {
       // reach the summary.
       step('Transcribing…');
       let t0 = Date.now();
-      const t = await api(`/recordings/${r.id}/process?stop_after=transcript${force ? '&force=1' : ''}`, { method: 'POST' });
+      const first = await api(`/recordings/${r.id}/process?stop_after=transcript${force ? '&force=1' : ''}`, { method: 'POST' });
       done('transcribe', r.transcriber || '', t0);
-      t0 = Date.now();
-      // A long call is still worth splitting here (not only the 10 minutes the background pass allows):
-      // this tab is open anyway, and the names then reach the summary.
-      if (local && needsTurns(t) && (diarizeEligible(t) || diarizeEligible(t, { manual: true }))) {
-        step('Detecting speakers…', 'diarize');
-        const row = await detectAndMatch(t, { manual: true, onStatus: (m) => step(m, 'diarize') });
-        if (row) done('diarize', '', t0);
-      } else if (diarizeEligible(t)) {
-        await detectAndMatch(t, { onStatus: (m) => step(m, 'diarize') });
-      } else if (eligible(t)) {
-        await matchRecording(t, (m) => step(m, 'match'));
-        done('match', '', t0);
+      // A long recording may have come back as several conversations (or trimmed): carry each through.
+      const kids = first.split_into || [first.id];
+      let out = null, shown = null;
+      for (const [k, kid] of kids.entries()) {
+        const t = kid === first.id ? first : await api('/recordings/' + kid);
+        const of = kids.length > 1 ? ` (${k + 1} of ${kids.length})` : '';
+        t0 = Date.now();
+        if (local && needsTurns(t) && (diarizeEligible(t) || diarizeEligible(t, { manual: true }))) {
+          step('Detecting speakers…' + of, 'diarize');
+          const row = await detectAndMatch(t, { manual: true, onStatus: (m) => step(m + of, 'diarize') });
+          if (row) done('diarize', '', t0);
+        } else if (diarizeEligible(t)) {
+          await detectAndMatch(t, { onStatus: (m) => step(m + of, 'diarize') });
+        } else if (eligible(t)) {
+          await matchRecording(t, (m) => step(m + of, 'match'));
+          done('match', '', t0);
+        }
+        step('Summarizing…' + of, 'summarize');
+        t0 = Date.now();
+        out = await api(`/recordings/${t.id}/process${kid === r.id ? q : ''}`, { method: 'POST' });
+        done('summarize', modelKey, t0);
+        shown = shown || out;
       }
-      step('Summarizing…', 'summarize');
-      t0 = Date.now();
-      const out = await api(`/recordings/${r.id}/process${q}`, { method: 'POST' });
-      done('summarize', modelKey, t0);
+      if (shown.id !== r.id) { state.current = shown.id; await refresh(); }
       stop();
-      render(out);
+      render(shown);
     } else {
       step('Transcribing and summarizing…', 'full');
       const t0 = Date.now();
       const out = await api(`/recordings/${r.id}/process${q}`, { method: 'POST' });
       done('full', modelKey, t0);
       stop();
+      if (out.id !== r.id) { state.current = out.id; await refresh(); } // it was split into several: show the first
       render(out);
     }
   } catch (e) {
@@ -146,6 +154,31 @@ export function taskRow(a, i) {
       <span class="meta">${a.owner ? `<span class="tag who">${icon('user', 12)} ${esc(a.owner)}</span>` : ''}${a.due ? `<span class="tag due${late ? ' late' : ''}">${icon('calendar', 12)} ${esc(a.due)}${late ? ' · overdue' : ''}</span>` : ''}</span></span></label>`;
 }
 
+// What shaping did to this recording, and the buttons to do it by hand or take it back.
+function shapeNote(r) {
+  const L = r.lineage;
+  if (r.hidden) {
+    return `<div class="banner" style="margin-top:12px">This recording was split, trimmed or joined into other recordings.
+      <button id="undo-shape" class="small" style="margin-left:8px">Undo and bring it back</button></div>`;
+  }
+  if (!L) return '';
+  const text = L.kind === 'split' ? `Part ${L.part} of ${L.of}, split from one longer recording at a long silence.`
+    : L.kind === 'merge' ? `Joined from ${L.from.length} recordings that were one call.`
+    : 'Dead air at the start and end was trimmed.';
+  return `<div class="row" style="margin-top:8px;gap:8px"><span class="muted" style="font-size:12px">${esc(text)}${L.audio === false ? ' The sound stays on the original (undo to listen).' : ''}</span>
+    <button id="undo-shape" class="small">Undo</button></div>`;
+}
+function shapeButtons(r) {
+  if (r.hidden || r.status !== 'ready') return '';
+  const idx = (state.recordings || []).findIndex((x) => x.id === r.id);
+  const older = idx >= 0 ? state.recordings[idx + 1] : null;
+  return [
+    !r.lineage && (r.segments || []).length > 1
+      ? '<button id="reshape" class="small" title="Cuts dead air at the start and end, and splits the recording wherever there is a long silence between conversations. The original is kept and can be restored.">Split by silence</button>' : '',
+    older ? `<button id="join-prev" class="small" title="Joins this with the recording before it as one call. The joined audio is transcribed again.">Join with previous</button>` : '',
+  ].join('');
+}
+
 export function render(r) {
   const tasks = r.action_items || [];
   clearTicks();
@@ -161,6 +194,7 @@ export function render(r) {
         <a href="/api/export?id=${r.id}" download><button class="small">Export .md</button></a>
         <a href="/api/export?id=${r.id}&format=docx" download><button class="small">Export .docx</button></a>
         <a href="/api/export?id=${r.id}&format=html" target="_blank" rel="noopener"><button class="small">Print / PDF</button></a>
+        ${shapeButtons(r)}
         <button id="del" class="small">Delete</button>
       </div>
     </div>
@@ -172,6 +206,7 @@ export function render(r) {
       ${r.model ? `<span class="pill model" title="${esc(r.model)}">${esc(friendlyModel(r.model))}</span>` : ''}
       ${r.tokens_in ? `<span class="pill" title="Input plus output tokens">${r.tokens_in + (r.tokens_out || 0)} tokens</span>` : ''}
     </div>
+    ${shapeNote(r)}
     ${r.error ? `<div class="banner" style="margin-top:12px">${esc(r.error)}</div>` : ''}
     ${r.recoverable ? '<div class="row" style="margin-top:8px"><button class="primary" id="recover">Recover audio</button></div>'
       : (r.status === 'error' || r.status === 'processing' || r.status === 'transcribed') ? '<div class="row" style="margin-top:8px"><button class="primary" id="retry">Retry</button></div>' : ''}
@@ -271,6 +306,40 @@ export function render(r) {
       await refresh();
       render(r);
     } catch (err) { alert(err.message); }
+  };
+  const undo = $('undo-shape');
+  if (undo) undo.onclick = async () => {
+    if (!confirm('Undo this? The pieces made from it are removed and the original comes back.')) return;
+    try {
+      const out = await api(`/recordings/${r.id}/undo-reshape`, { method: 'POST' });
+      state.current = out.restored[0];
+      await refresh();
+      render(await api('/recordings/' + out.restored[0]));
+    } catch (e) { alert(e.message); }
+  };
+  const reshape = $('reshape');
+  if (reshape) reshape.onclick = async () => {
+    if (!confirm('Split this wherever there is a long silence, and trim dead air at the start and end? Each piece is summarized again.')) return;
+    reshape.disabled = true; reshape.textContent = 'Working…';
+    try {
+      const out = await api(`/recordings/${r.id}/reshape`, { method: 'POST' });
+      if (!out.changed) { reshape.textContent = 'Nothing to split'; return; }
+      state.current = out.id;
+      await refresh();
+      render(out);
+    } catch (e) { alert(e.message); reshape.disabled = false; reshape.textContent = 'Split by silence'; }
+  };
+  const joinPrev = $('join-prev');
+  if (joinPrev) joinPrev.onclick = async () => {
+    const idx = state.recordings.findIndex((x) => x.id === r.id);
+    const older = state.recordings[idx + 1];
+    if (!older || !confirm(`Join this with "${older.title}" as one call? The joined audio is transcribed and summarized again, and the two originals are kept so you can undo.`)) return;
+    try {
+      const out = await api('/recordings/merge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: [older.id, r.id] }) });
+      state.current = out.id;
+      await refresh();
+      open(out.id);
+    } catch (e) { alert(e.message); }
   };
   $('del').onclick = async () => {
     if (!confirm('Delete this recording and its audio?')) return;

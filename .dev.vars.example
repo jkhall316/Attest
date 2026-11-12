@@ -47,3 +47,9 @@ STT_MODELS=microsoft/mai-transcribe-2
 # MS_CLIENT_SECRET=...
 # STT_LANGUAGE=en   # pin the spoken language; stops Whisper looping when it misdetects
 # HALLUCINATION_GUARD=off   # on by default; removes repeated-phrase and wrong-script junk from transcripts
+
+# Conversation shaping (all optional; see README "Conversation shaping")
+# SPLIT_GAP_MIN=5      # silence this long between speech = a different conversation
+# TRIM_MIN_SEC=30      # dead air longer than this at the start or end is trimmed
+# MERGE_GAP_MIN=3      # pieces of a call closer than this are joined before transcription
+# RESHAPE=off          # turn trimming, splitting and joining off

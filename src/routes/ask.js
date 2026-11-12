@@ -43,7 +43,7 @@ export async function retrieve(env, owner, question, area = '') {
     hits = (await env.DB.prepare(
       `SELECT r.id, r.title, r.transcript, r.summary
          FROM transcript_fts JOIN recordings r ON r.id = transcript_fts.id
-        WHERE transcript_fts MATCH ? AND r.owner = ?${ac.sql}
+        WHERE transcript_fts MATCH ? AND r.owner = ? AND r.hidden = 0${ac.sql}
         ORDER BY rank LIMIT 8`
     ).bind(q, owner, ...ac.binds).all()).results;
   }
@@ -55,7 +55,7 @@ export async function retrieve(env, owner, question, area = '') {
   if (!hits.length) {
     hits = (await env.DB.prepare(
       `SELECT id, title, transcript, summary FROM recordings
-        WHERE owner = ? AND status = 'ready'${areaClause(area).sql}
+        WHERE owner = ? AND status = 'ready' AND hidden = 0${areaClause(area).sql}
         ORDER BY created_at DESC LIMIT 5`
     ).bind(owner, ...areaClause(area).binds).all()).results;
   }

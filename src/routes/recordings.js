@@ -6,7 +6,7 @@ import { jsonAudioBody, base64Length, withLength } from '../stream.js';
 import { MAX_UPLOAD, MIN_SEGMENTS_FOR_TURNS, contextChars, localDiarize, maxUpload, modelById, transcriberById, previewTranscriber, defaultModel, effectiveTranscriber } from '../config.js';
 import { json, fail, uid, ownerOf } from '../http.js';
 import { readRow, resolveTemplate } from '../db.js';
-import { diarizeToText, parseJsonLoose, STALE_PROCESSING_MS } from '../text.js';
+import { diarizeToText, parseJsonLoose, safeParse, STALE_PROCESSING_MS } from '../text.js';
 import { buildSystemPrompt } from '../prompts.js';
 import { guardOn, cleanText, cleanSegments } from '../hallucination.js';
 import { nameSpeakers, rebuildTranscript, anonymousSpeakers, reassignSegments } from '../speakers.js';
@@ -15,6 +15,8 @@ import { VOICE_MODEL } from '../config.js';
 import { normalizeFacts } from '../memory.js';
 import { saveFacts, loadFacts } from './memory.js';
 import { AREAS, DEFAULT_AREA, normalizeArea, areaForTemplate, initialArea } from '../areas.js';
+import { reshapeAfterTranscript, consolidate } from './reshape.js';
+import { MAX_AUDIO_BYTES } from '../audio/index.js';
 import { indexRecording, deleteRecordingVectors } from '../vectors.js';
 
 /* --- #7 live transcription --- */
@@ -52,8 +54,8 @@ export async function upload(request, env, owner = ownerOf(request)) {
   const { area, area_source } = initialArea(form.get('area'), resolvedTemplate ? templateKey : 'meeting');
   const ins = await env.DB.prepare(
     `INSERT OR IGNORE INTO recordings (id, owner, title, created_at, duration_ms, r2_key, content_type,
-                             status, template, model, transcriber, ingest_id, area, area_source)
-     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?,?,?,?)`
+                             status, template, model, transcriber, ingest_id, area, area_source, src)
+     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?,?,?,?,?)`
   ).bind(
     id, owner,
     String(form.get('title') || '').trim() || 'Untitled recording',
@@ -63,12 +65,18 @@ export async function upload(request, env, owner = ownerOf(request)) {
     resolvedTemplate ? templateKey : 'meeting',
     modelById(form.get('model'), env)?.id || null,
     transcriberById(form.get('transcriber'), env).id,
-    ingestId, area, area_source,
+    ingestId, area, area_source, ingestId ? 'device' : null,
   ).run();
   if (ins?.meta?.changes === 0) { // two retries raced: keep the first, drop this audio
     await env.AUDIO.delete(key);
     const first = await env.DB.prepare('SELECT id FROM recordings WHERE owner = ? AND ingest_id = ?').bind(owner, ingestId).first();
     return json({ id: first?.id, duplicate: true });
+  }
+  // A device app uploads long calls in pieces (and a drained pendant, hours of them): put the pieces of
+  // one call back together before anything is transcribed. The answer says where this one ended up.
+  if (ingestId) {
+    try { const moved = await consolidate(env, owner); if (moved.has(id)) return json({ id: moved.get(id), merged_from: id }); }
+    catch (e) { console.error('merge after upload failed:', e?.message || e); }
   }
   return json({ id });
 }
@@ -354,6 +362,7 @@ export function isLooped(text) {
 export async function process(env, id, owner, { stopAfter, force } = {}) {
   const rec = await readRow(env, id, owner);
   if (!rec) throw httpError('recording not found', 404);
+  if (rec.hidden) throw httpError('this recording was split or merged into others; open those, or undo it', 409);
   if (rec.status === 'ready' && (rec.speakers || []).some((s) => s.confirmed)) {
     // Re-diarizing can permute the A/B labels, which would re-attach a human's
     // confirmed names to the wrong voices. Refuse rather than risk mislabeling.
@@ -380,6 +389,7 @@ export async function process(env, id, owner, { stopAfter, force } = {}) {
       || (rec.status === 'error' && /^summarize/.test(rec.error || '')));
     let segments, transcript, speakers, tokensIn = 0, tokensOut = 0;
 
+    let audioBuf = null; // kept so the reshape step below can cut it without a second read
     if (resume) {
       segments = rec.segments || [];
       transcript = rec.transcript;
@@ -390,6 +400,7 @@ export async function process(env, id, owner, { stopAfter, force } = {}) {
       if (!obj) throw new Error('audio object missing from R2');
       // Over the multipart cap on OpenRouter: leave the audio in R2 and stream it.
       const buf = usesOpenRouterStt(env) && obj.size > MAX_UPLOAD ? null : await obj.arrayBuffer();
+      audioBuf = buf;
       const openaiDiarize = effectiveTranscriber(env, rec.transcriber) === 'gpt-4o-transcribe-diarize';
       const refs = openaiDiarize ? await selectVoiceprints(env, owner, 4) : [];
       const { tj, sent, diarized, pendingTurns } = await transcribe(env, rec, buf, refs);
@@ -428,6 +439,18 @@ export async function process(env, id, owner, { stopAfter, force } = {}) {
         env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(id),
         env.DB.prepare('INSERT INTO transcript_fts (id, title, transcript) VALUES (?,?,?)').bind(id, rec.title, transcript),
       ]);
+    }
+
+    // Conversation shaping: trim dead air and split different conversations apart (also for rows that
+    // arrive already transcribed, like Omi). Not for a recording that is itself a result of shaping.
+    if (!rec.lineage) {
+      let kids = null;
+      try {
+        // A resumed row that still has audio (not Omi): read it now so the pieces get their own audio.
+        if (resume && rec.r2_key) { const o = await env.AUDIO.get(rec.r2_key); if (o && o.size <= MAX_AUDIO_BYTES) audioBuf = await o.arrayBuffer(); }
+        kids = await reshapeAfterTranscript(env, owner, rec, { segments, speakers, buf: audioBuf, tokensIn, tokensOut });
+      } catch (e) { console.error('reshape skipped:', e?.message || e); }
+      if (kids) return finishShaped(env, owner, kids, stopAfter, resume);
     }
 
     if (stopAfter === 'transcript') {
@@ -497,6 +520,66 @@ async function summarize(env, rec, id, owner, { transcript, accumulate, tokensIn
     await indexRecording(env, owner, { ...rec, summary: sj.summary || '', transcript }, facts);
   } catch (e) {
     console.error('memory update failed:', e?.message || e);
+  }
+}
+
+// After a recording was split or trimmed into `kids` (new rows, status 'transcribed'): stop there when the
+// browser wants to match voices first, else summarize each. A failed summary leaves that piece at
+// 'error' with its transcript saved, so Retry resumes it. Returns the first piece, with `split_into`.
+async function finishShaped(env, owner, kids, stopAfter, resumed) {
+  if (stopAfter !== 'transcript') {
+    for (const kid of kids) {
+      const row = await readRow(env, kid, owner);
+      try {
+        await env.DB.prepare("UPDATE recordings SET status='processing', status_at=? WHERE id=? AND owner=?").bind(Date.now(), kid, owner).run();
+        await summarize(env, row, kid, owner, { transcript: row.transcript, accumulate: true });
+      } catch (e) {
+        await env.DB.prepare("UPDATE recordings SET status='error', error=?, status_at=? WHERE id=? AND owner=?")
+          .bind(String(e?.message || e).slice(0, 500), Date.now(), kid, owner).run();
+      }
+    }
+  }
+  return { ...(await readRow(env, kids[0], owner)), split_into: kids };
+}
+
+// POST /:id/reshape: run the trim/split pass on a recording that already has a transcript (one that was
+// summarized before this existed, or an Omi import). The original is hidden and can be restored.
+export async function reshapeNow(env, owner, id) {
+  const rec = await readRow(env, id, owner);
+  if (!rec) return fail('not found', 404);
+  if (rec.hidden || rec.lineage) return fail('this recording is already the result of a split or merge', 409);
+  if (!['ready', 'transcribed'].includes(rec.status) || !rec.transcript) return fail('recording is not ready', 409);
+  let buf = null;
+  if (rec.r2_key) { const o = await env.AUDIO.get(rec.r2_key); if (o && o.size <= MAX_AUDIO_BYTES) buf = await o.arrayBuffer(); }
+  const kids = await reshapeAfterTranscript(env, owner, rec, { segments: rec.segments || [], speakers: rec.speakers || [], buf });
+  if (!kids) return json({ changed: false });
+  try { return json({ changed: true, ...(await finishShaped(env, owner, kids, undefined, true)) }); }
+  catch (e) { return fail(String(e?.message || e).slice(0, 300), 502); }
+}
+
+// Shaping keeps the originals hidden so it can be undone. Deleting must not leave them behind:
+// deleting a hidden original deletes what was made from it; deleting the last piece made from an
+// original deletes the original too (its audio and transcript would otherwise live on, invisible).
+async function removeShapedRelatives(env, owner, r) {
+  const drop = async (row) => {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(row.id),
+      env.DB.prepare('DELETE FROM facts WHERE recording_id = ? AND owner = ?').bind(row.id, owner),
+      env.DB.prepare('DELETE FROM recordings WHERE id = ? AND owner = ?').bind(row.id, owner),
+    ]);
+    try { await deleteRecordingVectors(env, row.id, row.vec_chunks); } catch { /* best effort */ }
+    if (row.r2_key) await env.AUDIO.delete(row.r2_key).catch(() => {});
+  };
+  const madeFrom = async (sid) => ((await env.DB.prepare('SELECT id, hidden, lineage, r2_key, vec_chunks FROM recordings WHERE owner = ? AND lineage LIKE ?')
+    .bind(owner, `%"${sid}"%`).all()).results || []).filter((c) => c.id !== r.id && (safeParse(c.lineage)?.from || []).includes(sid));
+  if (r.hidden) {
+    for (const d of await madeFrom(r.id)) if (!d.hidden) await drop(d);
+    return;
+  }
+  for (const sid of r.lineage?.from || []) {
+    if ((await madeFrom(sid)).length) continue; // a sibling piece is still there
+    const s = await env.DB.prepare('SELECT id, r2_key, vec_chunks, hidden FROM recordings WHERE id = ? AND owner = ?').bind(sid, owner).first();
+    if (s?.hidden) await drop(s);
   }
 }
 
@@ -730,6 +813,7 @@ export async function audio(env, id, owner, request) {
 export async function remove(env, id, owner) {
   const r = await readRow(env, id, owner);
   if (!r) return fail('not found', 404);
+  await removeShapedRelatives(env, owner, r);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(id),
     env.DB.prepare('DELETE FROM facts WHERE recording_id = ? AND owner = ?').bind(id, owner),

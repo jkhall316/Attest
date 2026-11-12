@@ -25,7 +25,7 @@ export async function listPeople(env, owner, area = '') {
   ).bind(owner).all()).results;
   // How many recordings each person is named in, and likely duplicates to offer merging.
   const ac = areaClause(area);
-  const recs = (await env.DB.prepare(`SELECT id, speakers FROM recordings WHERE owner = ?${ac.sql}`).bind(owner, ...ac.binds).all()).results || [];
+  const recs = (await env.DB.prepare(`SELECT id, speakers FROM recordings WHERE owner = ? AND hidden = 0${ac.sql}`).bind(owner, ...ac.binds).all()).results || [];
   const counts = new Map();
   for (const r of recs) {
     for (const name of new Set((safeParse(r.speakers) || []).map((x) => x?.name).filter(Boolean))) {

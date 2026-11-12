@@ -84,6 +84,16 @@ export const MIGRATIONS = [
     "ALTER TABLE recordings ADD COLUMN area_source TEXT NOT NULL DEFAULT 'auto'",
     'CREATE INDEX IF NOT EXISTS recordings_owner_area ON recordings (owner, area, created_at DESC)',
   ] },
+  // Conversation shaping: dead air trimmed, long recordings split into separate conversations, pieces of
+  // one call merged back together. The original rows stay (hidden = 1) so imports remain idempotent and
+  // the change can be undone; the new rows say where they came from in lineage
+  // ({kind: 'trim'|'split'|'merge', from: [ids]}). src is who made the recording ('device' = the pendant
+  // app, 'pocket'); only recordings from the same source are ever merged automatically.
+  { id: 12, sql: [
+    'ALTER TABLE recordings ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE recordings ADD COLUMN lineage TEXT',
+    'ALTER TABLE recordings ADD COLUMN src TEXT',
+  ] },
 ];
 
 // Applies every migration not yet recorded. `db` is a D1 binding (or anything with the

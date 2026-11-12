@@ -60,7 +60,7 @@ async function memorize(env, owner, rec) {
 // Ready recordings that still need work, newest first. Light columns only (no transcripts).
 async function pending(env, owner) {
   const rows = (await env.DB.prepare(
-    "SELECT id, facts_at, vec_chunks FROM recordings WHERE owner = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 2000"
+    "SELECT id, facts_at, vec_chunks FROM recordings WHERE owner = ? AND status = 'ready' AND hidden = 0 ORDER BY created_at DESC LIMIT 2000"
   ).bind(owner).all()).results || [];
   const vec = vectorsEnabled(env);
   return {

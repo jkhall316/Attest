@@ -28,6 +28,7 @@ export async function refresh() {
   $('home')?.classList.toggle('active', !onRecording && state.screen === 'today');
   $('nav-ask')?.classList.toggle('active', !onRecording && state.screen === 'ask');
   const { recordings } = await api('/recordings' + areaQuery());
+  state.recordings = recordings; // newest first; the recording page uses it to find its neighbour
   $('count').textContent = recordings.length ? `(${recordings.length})` : '';
   $('list').innerHTML = groupByDate(recordings).map((g) =>
     `<div class="group-title">${g.label}</div>${g.items.map((r) => recordingCard(r, state.current)).join('')}`).join('')

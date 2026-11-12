@@ -7,6 +7,7 @@
 
 import { maxUpload } from '../config.js';
 import { json, fail, uid } from '../http.js';
+import { consolidate } from './reshape.js';
 
 const BASE = 'https://public.heypocketai.com/api/v1/public';
 // Each import downloads whole audio files into Worker memory, so keep a call small and
@@ -94,8 +95,8 @@ export async function importNew(env, owner, daysIn = DEFAULT_DAYS, batch = BATCH
     const created = Date.parse(rec.recording_at || rec.created_at) || Date.now();
     const res = await env.DB.prepare(
       `INSERT OR IGNORE INTO recordings (id, owner, title, created_at, duration_ms, r2_key,
-                                         content_type, status, template, pocket_id, status_at)
-       VALUES (?,?,?,?,?,?,?,'uploaded','meeting',?,?)`
+                                         content_type, status, template, pocket_id, status_at, src)
+       VALUES (?,?,?,?,?,?,?,'uploaded','meeting',?,?,'pocket')`
     ).bind(
       id, owner, String(rec.title || '').trim() || 'Pocket recording', created,
       Number(rec.duration) > 0 ? Math.round(Number(rec.duration) * 1000) : null,
@@ -106,5 +107,18 @@ export async function importNew(env, owner, daysIn = DEFAULT_DAYS, batch = BATCH
   }
   // Skipped rows stay "fresh" until they succeed, so only count the ones not attempted.
   const remaining = Math.max(0, fresh.length - batch);
+  // Pocket chops long calls into recordings of its own choosing: join the ones that are one call.
+  try {
+    const moved = await consolidate(env, owner);
+    if (moved.size) {
+      const seen = new Set();
+      const next = [];
+      for (const r of imported) {
+        const id = moved.get(r.id) || r.id;
+        if (!seen.has(id)) { seen.add(id); next.push({ ...r, id }); }
+      }
+      imported.splice(0, imported.length, ...next);
+    }
+  } catch (e) { console.error('merge after Pocket import failed:', e?.message || e); }
   return { imported, skipped, remaining };
 }

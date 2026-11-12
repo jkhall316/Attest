@@ -3,6 +3,7 @@
 
 import { json, fail } from '../http.js';
 import { areaClause, normalizeArea } from '../areas.js';
+import { VISIBLE } from '../conversations.js';
 import { defaultModel } from '../config.js';
 import { llmFetch } from '../llm.js';
 import { safeParse } from '../text.js';
@@ -25,7 +26,7 @@ async function readyRows(env, owner, limit = 200, area = '') {
   const ac = areaClause(area);
   const rows = (await env.DB.prepare(
     `SELECT id, title, created_at, summary, transcript, action_items, speakers, unanswered
-       FROM recordings WHERE owner = ? AND status = 'ready'${ac.sql} ORDER BY created_at DESC LIMIT ${limit}`
+       FROM recordings WHERE owner = ? AND status = 'ready'${VISIBLE}${ac.sql} ORDER BY created_at DESC LIMIT ${limit}`
   ).bind(owner, ...ac.binds).all()).results || [];
   // Facts ride along so the model can read a few lines per recording instead of transcript.
   const facts = (await env.DB.prepare(

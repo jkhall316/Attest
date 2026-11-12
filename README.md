@@ -40,6 +40,7 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 | | What you get | Needs | Details |
 |---|---|---|---|
 | **Record, upload, import** | Browser recorder with live preview and crash recovery, file upload, Pocket import, Omi import | nothing extra (Pocket and Omi need a key) | [Recording](#recording-uploading-importing) |
+| **One recording, one conversation** | Dead air at the start and end is trimmed, a long silence splits different conversations apart, and pieces of one call the source chopped up are joined back; originals are kept and every change can be undone | nothing | [Conversation shaping](#conversation-shaping-trim-split-join) |
 | **Areas** | Every recording is tagged Work, Personal, Health or Learning, picked for you and changeable; a header filter limits the lists, Today, Ask, memory and export to one area | nothing | [Areas](#areas-work-personal-health-learning) |
 | **Devices you choose** | Tick the ones you use (the app, Pocket, Omi, a Limitless pendant); the main screen, setup and background sync follow your choice | nothing | [Choosing your devices](#choosing-your-devices) |
 | **Phone and Mac app** | Attest in a native shell, a bottom tab bar on phones, and a **Bluetooth pendant sync** with background upload on iPhone | an Apple developer account to run it on your phone | [apple/README.md](apple/README.md) |
@@ -350,6 +351,20 @@ Every recording belongs to one of four areas, so a work life and a home life do 
 - **Filter everything.** The **All areas / Work / Personal / Health / Learning** dropdown in the header (saved in your browser) limits the sidebar, command palette, Today (open items and the daily and weekly briefs, each cached per area), prompts, Ask and chats, memory, the People counts and exports. While a filter is on, a new recording is tagged with that area.
 - **Recordings from before this existed** are all Work. Run `POST /api/recordings/areas/backfill` once to re-derive each automatic one from its summary style; anything you chose by hand is left alone.
 - **API.** `GET /api/recordings`, `/api/today`, `/api/memory`, `/api/people` and `/api/export` take `?area=<work|personal|health|learning>`; `POST /api/ask`, `/api/chats/:id/messages`, `/api/today/brief` and `/api/insight` take `area` in the body; a missing or unknown value means all. Uploads (`POST /api/recordings`, form field `area`) and `POST /api/recordings/live` (JSON field `area`) accept an explicit area. `PATCH /api/recordings/:id/area {area}` sets one (`"auto"` hands it back).
+
+### Conversation shaping: trim, split, join
+
+Recorders cut calls wherever they like (Pocket and the pendant app split long calls into pieces; Omi sometimes glues unrelated conversations into one). Attest works out where a conversation really starts and ends from the **transcript's timestamps**, not from the provider's boundaries:
+
+- **Trim.** Silence of more than 30 seconds before the first word or after the last is cut, keeping 3 seconds of padding. This needs the transcript's segment times (diarizing and local transcribers give them; plain-text transcription does not, and is left alone).
+- **Split.** A silence of 5 minutes or more between two stretches of speech means two different conversations. Each becomes its own recording with its own audio, speakers, summary, facts and area, titled "Name (1/3)". A stray scrap of speech (a few words) is folded into its neighbour rather than becoming a recording, and a piece longer than 100 minutes is also cut at its longest pause of a minute or more.
+- **Join.** Pieces from the same source (the pendant app or Pocket) that are 3 minutes apart or less, and not yet transcribed, are joined into one recording before transcription, so the whole call is transcribed and its speakers worked out once. This happens when they are uploaded or imported. Background processing waits a few minutes on the newest piece in case the rest of the call is still arriving.
+
+Audio is cut and joined **without re-encoding** (no ffmpeg; a Worker cannot run it): WAV, MP3 and WebM/Opus are handled by copying frames and packets, so there is no quality loss and almost no CPU cost. Other formats (M4A, ...) and files over 48 MB are never cut. A split of such a recording still happens at the text level: the pieces are text-only and the sound stays on the original. Transcript-only imports (Omi) are split the same way, and their pieces are text-only.
+
+**Nothing is destroyed.** The original is hidden, not deleted, so re-importing never creates it again. A recording made this way says so at the top, with an **Undo** button that removes the pieces and brings the original back (a join unwinds all the way to the original pieces, and they are not joined again). Deleting the last piece of a split also deletes the hidden original, so nothing lingers out of sight. For a recording that was summarized before this existed, use **Split by silence** on its page. **Join with previous** joins two recordings you know were one call, even if already transcribed; the joined audio is transcribed again, because speaker labels from two separate transcriptions do not line up.
+
+Settings (Worker variables, all optional): `SPLIT_GAP_MIN` (default 5), `TRIM_MIN_SEC` (default 30), `MERGE_GAP_MIN` (default 3), `RESHAPE=off` to turn all of it off. API: `POST /api/recordings/:id/reshape`, `POST /api/recordings/:id/undo-reshape`, `POST /api/recordings/merge {ids}`; `POST /api/recordings/:id/process` answers with the first new recording and `split_into` when it split one.
 
 ### Summaries and mind maps
 
