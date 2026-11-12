@@ -55,6 +55,9 @@ export function initials(name) {
   return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
 }
 
+// Talk-balance colours, by rank; the player's waveform uses the same ones so the two read together.
+export const speakerColor = (i) => `hsl(${(235 + i * 67) % 360} 70% 64%)`;
+
 // A stable avatar color per name, as inline CSS custom properties.
 export function avatarStyle(name) {
   let h = 0;

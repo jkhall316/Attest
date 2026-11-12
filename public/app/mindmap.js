@@ -23,11 +23,12 @@ export function mindmapCard(mindmaps) {
         <button class="ghost icon" id="mm-out" title="Zoom out" aria-label="Zoom out">${icon('zoomOut', 17)}</button>
         <button class="ghost icon" id="mm-in" title="Zoom in" aria-label="Zoom in">${icon('zoomIn', 17)}</button>
         <button class="ghost icon" id="mm-fit" title="Fit to view" aria-label="Fit to view">${icon('fit', 17)}</button>
+        <button class="ghost icon" id="mm-full" title="Full screen" aria-label="Full screen" aria-pressed="false">${icon('expand', 17)}</button>
         <button class="ghost small" id="mm-svg" title="Download as SVG">${icon('download', 14)} SVG</button>
         <button class="ghost small" id="mm-png" title="Download as PNG">${icon('download', 14)} PNG</button>
       </div></div>
     ${panels}
-    <div class="mm-hint">Scroll or pinch to zoom, drag to pan.</div></div>`;
+    <div class="mm-hint">Pinch or scroll to zoom, drag to pan, tap a topic to fold it.</div></div>`;
 }
 
 async function draw(panel, text) {
@@ -99,6 +100,16 @@ export function wireMindmaps(mindmaps, title = 'mind-map') {
   $('mm-in').onclick = () => mm()?.rescale(1.3);
   $('mm-out').onclick = () => mm()?.rescale(1 / 1.3);
   $('mm-fit').onclick = () => mm()?.fit();
+  const card = document.querySelector('.mm-card');
+  const setFull = (on) => {
+    card.classList.toggle('full', on);
+    $('mm-full').setAttribute('aria-pressed', String(on));
+    $('mm-full').innerHTML = icon(on ? 'x' : 'expand', 17);
+    $('mm-full').title = on ? 'Exit full screen' : 'Full screen';
+    requestAnimationFrame(() => mm()?.fit());
+  };
+  $('mm-full').onclick = () => setFull(!card.classList.contains('full'));
+  card.onkeydown = (e) => { if (e.key === 'Escape' && card.classList.contains('full')) setFull(false); };
   const fname = (ext) => `${String(title).replace(/[^\w.-]+/g, '_').slice(0, 60) || 'mind-map'}-${activePanel()?.dataset.k || 'map'}.${ext}`;
   $('mm-svg').onclick = () => { const s = svgOf(activePanel()); if (s) download(fname('svg'), new Blob([s.xml], { type: 'image/svg+xml' })); };
   $('mm-png').onclick = () => {

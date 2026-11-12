@@ -172,7 +172,7 @@ export function render(r) {
     ${r.error ? `<div class="banner" style="margin-top:12px">${esc(r.error)}</div>` : ''}
     ${r.recoverable ? '<div class="row" style="margin-top:8px"><button class="primary" id="recover">Recover audio</button></div>'
       : (r.status === 'error' || r.status === 'processing' || r.status === 'transcribed') ? '<div class="row" style="margin-top:8px"><button class="primary" id="retry">Retry</button></div>' : ''}
-    ${r.status === 'recording' ? '' : playerHtml(r)}
+    ${r.status === 'recording' || r.has_audio === false ? '' : playerHtml(r)}
     ${r.status !== 'ready' ? `<h3>Status</h3><div class="muted">${esc(r.status)}…</div>` : ''}
     ${r.summary ? `<h3>Summary</h3><div class="card-box">${noteHtml(r.summary)}</div>` : ''}
     ${tasks.length ? `<h3>Action items</h3><div class="list">${tasks.map(taskRow).join('')}</div>` : ''}
@@ -181,7 +181,8 @@ export function render(r) {
     ${renderSpeakerChips(r.speakers, r.status === 'ready')}
     ${renderTalk(r.talk_stats, getMe())}
     <div class="row" style="margin-top:6px"><span class="muted" id="vm-status"></span>${r.voice_changed
-      ? '<button id="resum" class="primary">Re-summarize with names</button>' : ''}${needsManual(r)
+      ? '<button id="resum" class="primary">Re-summarize with names</button>' : ''}${r.status === 'ready' && r.speakers?.some((s) => s.name)
+      ? '<button id="reset-names" class="small" title="Sets every speaker back to Unknown, including names you confirmed. The summary is not changed until you re-summarize.">Clear speaker names</button>' : ''}${needsManual(r)
       ? '<button id="vm-run" class="small" title="Matches the voices in this recording to the people you enrolled. Runs in the background, about 30 seconds; your audio stays in this browser.">Recognise voices</button>' : ''}${diarizeEligible(r, { manual: true }) && !diarizeEligible(r)
       ? `<button id="dz-run" class="small" title="Works out who is speaking when, from their voices, then recognises people you enrolled. Runs in the background, up to a few minutes on a long recording; your audio stays in this browser.">${needsTurns(r) ? 'Detect speakers' : 'Re-detect speakers'}</button>` : ''}</div>
     ${transcriptCard(r)}
@@ -235,6 +236,17 @@ export function render(r) {
   runButton('dz-run', needsTurns(r) ? 'Detect speakers' : 'Re-detect speakers', (o) => detectAndMatch(r, o));
   if ($('recover')) $('recover').onclick = () => recover(r);
   if ($('retry')) $('retry').onclick = () => process(r, { force: true });
+  if ($('reset-names')) $('reset-names').onclick = async () => {
+    if (!confirm('Clear all speaker names on this recording, including ones you confirmed?')) return;
+    $('reset-names').disabled = true;
+    try {
+      render(await api(`/recordings/${r.id}/reset-speakers`, { method: 'POST' }));
+      refresh();
+    } catch (e) {
+      $('reset-names').disabled = false;
+      $('vm-status').textContent = e.message;
+    }
+  };
   if ($('resum')) $('resum').onclick = async () => {
     $('resum').disabled = true;
     $('vm-status').textContent = 'Summarizing…';
@@ -338,13 +350,15 @@ export function renderUnanswered(list) {
 
 // Talk balance (#11), measured from the stored turns, not inferred: one split bar for the
 // whole conversation, then each speaker's numbers as chips.
-export const speakerColor = (i) => `hsl(${(235 + i * 67) % 360} 70% 64%)`;
+export { speakerColor } from './format.js';
+import { speakerColor } from './format.js';
 
 export function renderTalk(stats, me = '') {
   if (!stats?.length) return '';
   const bar = stats.map((s, i) => `<span style="flex:${Math.max(s.share, 0.01)};background:${speakerColor(i)}" title="${esc(s.name)}: ${Math.round(s.share * 100)}%"></span>`).join('');
   const rows = stats.map((s, i) => `<div class="talk-row">
-      <div class="nm"><span class="dot" style="background:${speakerColor(i)}"></span><span style="overflow:hidden;text-overflow:ellipsis">${esc(s.name)}</span>${me && isMe(s.name, me) ? ' <span class="pill you">you</span>' : ''}</div>
+      <div class="nm-col"><div class="nm"><span class="dot" style="background:${speakerColor(i)}"></span><span style="overflow:hidden;text-overflow:ellipsis">${esc(s.name)}</span>${me && isMe(s.name, me) ? ' <span class="pill you">you</span>' : ''}<span class="pct">${Math.round(s.share * 100)}%</span></div>
+        <div class="talk-meter" role="progressbar" aria-label="${esc(s.name)} share of talk time" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(s.share * 100)}"><span style="width:${Math.max(1, Math.round(s.share * 100))}%;background:${speakerColor(i)}"></span></div></div>
       <div class="chips"><span class="metric"><b>${Math.round(s.share * 100)}%</b> of talk time</span><span class="metric"><b>${s.turns}</b> turn${s.turns === 1 ? '' : 's'}</span>
         <span class="metric"><b>${s.questions}</b> question${s.questions === 1 ? '' : 's'}</span><span class="metric">longest <b>${s.longest_s}s</b></span><span class="metric"><b>${s.overlaps}</b> cut-in${s.overlaps === 1 ? '' : 's'}</span></div></div>`).join('');
   return `<h3>Talk balance</h3><div class="card-box"><div class="talk-bar" role="img" aria-label="Share of talk time by speaker">${bar}</div><div class="talk-legend">${rows}</div></div>`;

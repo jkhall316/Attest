@@ -809,3 +809,18 @@ test('reassignSegments: move turns, create a new speaker, order by first appeara
   assert.deepEqual(plain.segments.map((x) => x.speaker), [undefined, 'A']);
   assert.deepEqual(plain.speakers.map((x) => x.label), ['Speaker', 'A']);
 });
+
+import { withRateLimitRetry } from '../src/llm.js';
+test('withRateLimitRetry waits out 429s then returns the success', async () => {
+  const waits = [];
+  let n = 0;
+  const r = await withRateLimitRetry(async () => (++n < 3 ? new Response('x', { status: 429, headers: { 'retry-after': '1' } }) : new Response('ok')),
+    { sleep: async (ms) => waits.push(ms) });
+  assert.equal(r.status, 200);
+  assert.equal(n, 3);
+  assert.deepEqual(waits, [1000, 2000]);
+});
+test('withRateLimitRetry gives up after the last try and returns the 429', async () => {
+  const r = await withRateLimitRetry(async () => new Response('x', { status: 429 }), { tries: 2, sleep: async () => {} });
+  assert.equal(r.status, 429);
+});

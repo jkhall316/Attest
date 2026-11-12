@@ -2,6 +2,7 @@
 // replace the API key, Save. Changes apply immediately; no redeploy. The key is write-only:
 // the server only says whether one is set.
 
+import { renderSources } from './sources.js';
 import { $, esc } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -51,15 +52,71 @@ function modelList(name, options, picked) {
     + `<input id="${name}-extra" placeholder="Add another model id (openrouter.ai/models)" style="margin-top:6px">`;
 }
 
-// Voice recognition and the Pocket key: the two settings that apply however Attest is run.
+// Which devices are in use, and the keys they need. Only the ticked sources show their key field.
+const SOURCE_CHOICES = [
+  { id: 'mic', label: 'Record or upload in this app', note: 'Microphone or audio files. No setup.' },
+  { id: 'pocket', label: 'Pocket', note: 'Pulls your Pocket recordings with their audio.' },
+  { id: 'omi', label: 'Omi, or a Limitless pendant paired with the Omi app', note: 'Pulls conversations from your Omi account. Omi shares transcripts, not audio.' },
+  { id: 'pendant', label: 'Limitless pendant over Bluetooth', note: 'Full audio, straight from the pendant, through the Attest app for Mac or iPhone. Nothing to enter here.' },
+];
+
+// Inside the Attest app (iPhone/Mac) the page can ask the app to open its native pendant panel.
+const nativeBridge = () => (typeof window !== 'undefined' ? window.webkit?.messageHandlers?.attest : null);
+
+export function sourcesHtml(s = {}) {
+  const on = s.sources || ['mic'];
+  const keyField = (id, name, has, ph, help) => `
+    <div class="src-key" data-src="${id}"${on.includes(id) ? '' : ' hidden'}>
+      <input id="set-${id}" type="password" autocomplete="off" placeholder="${has ? 'A key is saved. Leave blank to keep it.' : ph}">
+      <div class="muted" style="margin-top:4px">${help}</div>
+      ${has ? `<label class="opt"><input type="checkbox" id="set-${id}-clear"><span>Remove the saved ${name} key</span></label>` : ''}
+    </div>`;
+  return `<h3>Where your recordings come from</h3>
+    <div class="muted" style="margin-bottom:6px">Tick every device you use. The main screen shows only these, and the background sync follows them.</div>
+    ${SOURCE_CHOICES.map((c) => `
+      <label class="opt"><input type="checkbox" class="set-src" value="${c.id}"${on.includes(c.id) ? ' checked' : ''}>
+        <span><b>${esc(c.label)}</b><br><span class="muted">${esc(c.note)}</span></span></label>
+      ${c.id === 'pocket' ? keyField('pocket', 'Pocket', s.has_pocket_key, 'Paste your Pocket API key',
+        'Lets “Import from Pocket” and the background sync pull your Pocket recordings. Stored in your database and never shown again.') : ''}
+      ${c.id === 'pendant' && nativeBridge() ? '<div class="src-key" data-src="pendant"' + (on.includes('pendant') ? '' : ' hidden') + '><button type="button" class="small" id="open-pendant">Open pendant sync</button></div>' : ''}
+      ${c.id === 'omi' ? keyField('omi', 'Omi', s.has_omi_key, 'Paste your Omi Developer API key',
+        'Create a key in the Omi app under Settings, Developer Settings, with only the <code>conversations:read</code> scope. Stored in your database and never shown again.') : ''}`).join('')}`;
+}
+
+// Show a source's key field only while its box is ticked.
+export function wireSources() {
+  const sync = () => {
+    const on = checked('.set-src');
+    document.querySelectorAll('.src-key').forEach((el) => { el.hidden = !on.includes(el.dataset.src); });
+  };
+  document.querySelectorAll('.set-src').forEach((el) => { el.onchange = sync; });
+  const open = $('open-pendant');
+  if (open) open.onclick = () => nativeBridge()?.postMessage({ action: 'pendant' });
+}
+
+// The sources part of a save: which are ticked, and the keys typed in for them.
+const sourceBody = () => ({
+  sources: checked('.set-src'),
+  pocket_api_key: $('set-pocket').value,
+  pocket_clear: Boolean($('set-pocket-clear')?.checked),
+  omi_api_key: $('set-omi').value,
+  omi_clear: Boolean($('set-omi-clear')?.checked),
+});
+
+const LANGS = [['', 'Auto-detect'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['ja', 'Japanese'], ['zh', 'Chinese'], ['ko', 'Korean'], ['ru', 'Russian']];
+
+// Voice recognition and the sources: the settings that apply however Attest is run.
 export function extrasHtml(s = {}) {
   return `<h3>Voice recognition</h3>
     <label class="opt"><input type="checkbox" id="set-voice"${s.voice_match !== false ? ' checked' : ''}>
       <span>Recognise enrolled voices <span class="muted">(downloads a 49MB voice model once; runs in your browser, works with any provider)</span></span></label>
-    <h3>Pocket</h3>
-    <input id="set-pocket" type="password" autocomplete="off" placeholder="${s.has_pocket_key ? 'A key is saved. Leave blank to keep it.' : 'Paste your Pocket API key (optional)'}">
-    <div class="muted" style="margin-top:4px">Lets “Import from Pocket” and the background sync pull your Pocket recordings. Stored in your database and never shown again.</div>
-    ${s.has_pocket_key ? '<label class="opt"><input type="checkbox" id="set-pocket-clear"><span>Remove the saved Pocket key</span></label>' : ''}`;
+    <h3>Transcription</h3>
+    <label class="muted" style="display:block">Expected language
+      <select id="set-lang" style="width:100%">${LANGS.map(([c, n]) => `<option value="${c}"${(s.stt_language || '') === c ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+    <div class="muted" style="margin:4px 0 8px">Pins the language so the speech model cannot guess wrong and loop. Applies to models that accept it (Whisper).</div>
+    <label class="opt"><input type="checkbox" id="set-guard"${s.hallucination_guard !== false ? ' checked' : ''}>
+      <span>Hallucination guard <span class="muted">(removes phrases repeated over silence, and with English expected, stray Russian/Japanese/other scripts. Hand-started recordings like Pocket always have noise at the ends. Turn off if it ever removes real speech.)</span></span></label>
+    ${sourcesHtml(s)}`;
 }
 
 function render() {
@@ -89,6 +146,7 @@ function render() {
   };
   syncDefault();
   $('set-body').onchange = $('set-body').oninput = syncDefault;
+  wireSources();
 }
 
 async function save() {
@@ -101,13 +159,15 @@ async function save() {
     stt_models: p === 'openrouter' ? [...checked('.set-stt'), extra('set-stt-extra')].filter(Boolean) : [],
     api_key: $('set-key').value,
     voice_match: $('set-voice').checked ? 'on' : 'off',
-    pocket_api_key: $('set-pocket').value,
-    pocket_clear: Boolean($('set-pocket-clear')?.checked),
+    stt_language: $('set-lang').value,
+    hallucination_guard: $('set-guard').checked ? 'on' : 'off',
+    ...sourceBody(),
   };
   $('set-status').textContent = 'Saving…';
   try {
     S = await api('/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     state.META = await api('/meta');
+    renderSources(state.META.sources);
     fillSelects();
     $('set-status').textContent = 'Saved. New recordings use these settings.';
     $('set-provider').value = S.provider === 'custom' ? 'openai' : S.provider;
@@ -132,18 +192,21 @@ async function renderLocal() {
   const got = await api('/settings');
   S = got;
   $('set-body').innerHTML = localSettingsHtml(state.META, got);
+  wireSources();
 }
 
 async function saveLocal() {
   const body = {
-    pocket_api_key: $('set-pocket').value,
-    pocket_clear: Boolean($('set-pocket-clear')?.checked),
+    ...sourceBody(),
     voice_match: $('set-voice').checked ? 'on' : 'off',
+    stt_language: $('set-lang').value,
+    hallucination_guard: $('set-guard').checked ? 'on' : 'off',
   };
   $('set-status').textContent = 'Saving…';
   try {
     await api('/settings/extras', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     state.META = await api('/meta');
+    renderSources(state.META.sources);
     await renderLocal();
     $('set-status').textContent = 'Saved.';
   } catch (e) {

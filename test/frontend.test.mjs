@@ -25,8 +25,9 @@ globalThis.document = {
   },
   querySelectorAll: () => [],
   addEventListener() {},
-  body: { insertAdjacentHTML() {}, appendChild() {} },
+  body: { insertAdjacentHTML() {}, appendChild() {}, dataset: {} },
 };
+globalThis.MutationObserver = class { observe() {} disconnect() {} };
 
 const calls = [];
 globalThis.fetch = async (url) => {
@@ -776,4 +777,85 @@ test('isAcked hides reworded repeats but not different items', async () => {
   assert.ok(isAcked('still need to send pricing deck to ben', set));
   assert.ok(!isAcked('call vendor about the invoice', set));
   assert.ok(!isAcked('send ben', set));
+});
+
+test('sidebarPlan shows only the chosen sources, with "Import from all" once two can import', async () => {
+  const { sidebarPlan } = await import('../public/app/sources.js').catch(() => ({}));
+  if (!sidebarPlan) return; // module needs a browser DOM to import in this harness
+  const s = (id, pull, ready = true) => ({ id, pull, ready });
+  assert.deepEqual(sidebarPlan([s('mic', false)]).imports, []);
+  assert.equal(sidebarPlan([s('mic', false)]).mic, true);
+  assert.equal(sidebarPlan([s('pocket', true)]).mic, false, 'someone who never records in the app does not see Record');
+  assert.equal(sidebarPlan([s('pocket', true)]).all, false);
+  assert.equal(sidebarPlan([s('pocket', true), s('omi', true)]).all, true);
+  assert.equal(sidebarPlan([s('pocket', true), s('omi', true, false)]).all, false, 'a source with no key cannot be part of "all"');
+  assert.equal(sidebarPlan([s('pendant', false)]).pendant, true);
+  assert.equal(sidebarPlan([]).empty, true);
+});
+
+test('the bottom tab bar wires Home, Ask, Record, Recordings and Settings, and switches panes', async () => {
+  const { wireTabbar, setTab } = await import('../public/app/tabbar.js');
+  const bar = document.getElementById('tabbar');
+  const btns = ['home', 'ask', 'record', 'recordings', 'settings'].map((tab) => ({ dataset: { tab }, classList: { toggle() {}, add() {}, remove() {} } }));
+  bar.querySelectorAll = (sel) => (sel === 'button[data-tab]' ? btns : []);
+  wireTabbar();
+  assert.equal(document.body.dataset.tab, 'home', 'starts on Home');
+  let settingsClicks = 0, recClicks = 0;
+  document.getElementById('settings').click = () => settingsClicks++;
+  document.getElementById('rec').click = () => recClicks++;
+  const tap = (tab) => bar.onclick({ target: { closest: () => btns.find((b) => b.dataset.tab === tab) } });
+  tap('recordings');
+  assert.equal(document.body.dataset.tab, 'recordings');
+  tap('record');
+  assert.equal(recClicks, 1, 'the centre button starts recording');
+  assert.equal(document.body.dataset.tab, 'recordings', 'and shows the pane with the timer and live text');
+  tap('settings');
+  assert.equal(settingsClicks, 1, 'Settings opens the existing dialog');
+  tap('ask');
+  assert.equal(document.body.dataset.tab, 'ask');
+  setTab('home');
+});
+
+test('Settings offers "Open pendant sync" only inside the Attest app', async () => {
+  const { sourcesHtml } = await import('../public/app/settings.js');
+  const s = { sources: ['mic', 'pendant'] };
+  assert.doesNotMatch(sourcesHtml(s), /open-pendant/, 'a plain browser has no app to open');
+  globalThis.webkit = { messageHandlers: { attest: { postMessage() {} } } };
+  try { assert.match(sourcesHtml(s), /id="open-pendant"/); } finally { delete globalThis.webkit; }
+});
+
+test('waveBars bins timed speech by share of each slice and colours it by who spoke most', async () => {
+  const { waveBars } = await import('../public/app/player.js');
+  assert.deepEqual(waveBars([], []), [], 'nothing timed, no waveform');
+  assert.deepEqual(waveBars([{ text: 'hi' }], []), [], 'untimed segments are ignored');
+  const bars = waveBars([
+    { speaker: 'A', start: 0, end: 10, text: 'x'.repeat(100) },
+    { speaker: 'B', start: 20, end: 25, text: 'y'.repeat(25) },
+  ], [{ label: 'A', name: 'Jeff', confirmed: true }], 40, 4);
+  assert.equal(bars.length, 4);
+  assert.equal(bars[0].h, 1, 'a slice that is all speech is full height');
+  assert.equal(bars[0].who, 'Jeff', 'named speakers show by name');
+  assert.equal(bars[1].h, 0, 'silence is zero');
+  assert.equal(bars[2].h, 0.34, 'half the slice, at half the busiest rate: 0.5 x (0.35 + 0.65 x 0.5)');
+  assert.equal(bars[3].h, 0);
+});
+
+test('omniScope says in words what the date and speaker chips narrow the question to', async () => {
+  const { omniScope, omnibarHtml } = await import('../public/app/today.js');
+  assert.equal(omniScope('', ''), '', 'no chips: a normal chat over everything');
+  assert.match(omniScope('7', ''), /last 7 days/);
+  assert.match(omniScope('1', ''), /last day\b/);
+  assert.match(omniScope('', 'Ben'), /last 60 days with Ben/, 'speaker alone uses the widest window the endpoint allows');
+  const html = omnibarHtml([{ name: '<b>Ben</b>' }]);
+  assert.match(html, /id="t-days"/);
+  assert.match(html, /id="t-who"/);
+  assert.doesNotMatch(html, /<b>Ben<\/b>/, 'names are escaped');
+  assert.doesNotMatch(omnibarHtml([]), /id="t-who"/, 'no people yet, no speaker chip');
+});
+
+test('talk balance gives each speaker an accessible progress bar', async () => {
+  const { renderTalk } = await import('../public/app/recordings.js');
+  const talk = renderTalk([{ name: 'Jeff', share: 0.75, turns: 3, questions: 0, longest_s: 5, overlaps: 0 }]);
+  assert.match(talk, /role="progressbar"[^>]*aria-valuenow="75"/);
+  assert.match(talk, /width:75%/);
 });

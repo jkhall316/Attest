@@ -30,7 +30,7 @@ const running = new Set(); // recording ids being matched right now: one run at 
 // 15-minute automatic limit (up to the decode ceiling) and ignores an earlier skip.
 export function eligible(r, { manual = false } = {}) {
   if (!state.META?.voice_match_enabled) return false;
-  if (!r?.segments?.length || !r.speakers?.some((s) => !s.confirmed)) return false;
+  if (!r?.segments?.length || r.has_audio === false || !r.speakers?.some((s) => !s.confirmed)) return false;
   if (running.has(r.id)) return false;
   if (!manual && skipped(r.id)) return false;
   if (r.duration_ms && r.duration_ms > (manual ? MAX_DECODE_MS : AUTO_MAX_MS)) return false;

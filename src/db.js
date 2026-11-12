@@ -11,6 +11,7 @@ export async function readRow(env, id, owner) {
   return {
     ...r,
     ...effectiveStatus(r),
+    has_audio: Boolean(r.r2_key), // false for rows imported as transcripts (Omi)
     segments: safeParse(r.segments),
     action_items: safeParse(r.action_items),
     mindmaps: safeParse(r.mindmaps) || (r.mindmap ? { topic: r.mindmap } : null),

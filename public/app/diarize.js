@@ -237,7 +237,7 @@ export const canRedetect = (r) => Boolean(
   r?.segments?.length >= DIARIZE.minSegments && r.speakers?.length && ['ready', 'transcribed'].includes(r.status));
 
 export function diarizeEligible(r, { manual = false } = {}) {
-  if (!state.META?.diarize_local || !(manual ? canRedetect(r) : needsTurns(r)) || running.has(r.id)) return false;
+  if (r?.has_audio === false || !state.META?.diarize_local || !(manual ? canRedetect(r) : needsTurns(r)) || running.has(r.id)) return false;
   if (!manual && skipped(r.id)) return false;
   return !r.duration_ms || r.duration_ms <= (manual ? MAX_DECODE_MS : DIARIZE.autoMaxMs);
 }

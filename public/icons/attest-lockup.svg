@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 1400" width="1200" height="1400">
+  <!-- Brand lockup: the app icon over an embossed geometric "ATTEST" wordmark, on the dark canvas.
+       For press, the README and splash screens. The app icon itself carries no text. -->
+  <defs>
+    <radialGradient id="stage" cx=".5" cy=".38" r=".7">
+      <stop offset="0" stop-color="#1e1b4b"/><stop offset=".6" stop-color="#0c0a1d"/><stop offset="1" stop-color="#09090b"/>
+    </radialGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#e0e7ff"/><stop offset="1" stop-color="#a5b4fc"/>
+    </linearGradient>
+    <filter id="emboss" x="-10%" y="-30%" width="120%" height="160%">
+      <feDropShadow dx="0" dy="-2" stdDeviation="0" flood-color="#ffffff" flood-opacity=".55" result="hi"/>
+      <feDropShadow in="SourceGraphic" dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".7" result="lo"/>
+      <feMerge><feMergeNode in="lo"/><feMergeNode in="hi"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="halo" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="60"/></filter>
+  </defs>
+  <rect width="1200" height="1400" fill="url(#stage)"/>
+  <ellipse cx="600" cy="560" rx="360" ry="320" fill="#6366f1" opacity=".35" filter="url(#halo)"/>
+  <image href="attest.svg" xlink:href="attest.svg" x="300" y="210" width="600" height="600"/>
+  <text x="581" y="1060" text-anchor="middle" fill="url(#word)" filter="url(#emboss)"
+        font-family="Inter, 'Geist', 'SF Pro Display', system-ui, -apple-system, sans-serif" font-size="150" font-weight="800" letter-spacing="38">ATTEST</text>
+  <text x="597" y="1150" text-anchor="middle" fill="#a1a1aa"
+        font-family="Inter, 'Geist', system-ui, -apple-system, sans-serif" font-size="34" font-weight="500" letter-spacing="6">audio intelligence, on the record</text>
+</svg>

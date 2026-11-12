@@ -60,6 +60,7 @@ REQUIRE_ACCESS = "true"
 #   OPENAI_API_KEY          required with OpenAI (chat + transcription)
 #   LLM_API_KEY, STT_API_KEY  keys for LLM_BASE_URL / STT_BASE_URL (OpenRouter); fall back to OPENAI_API_KEY
 #   POCKET_API_KEY          optional, enables "Import from Pocket"
+#   OMI_API_KEY             optional, enables "Import from Omi" (transcripts only)
 # Placeholders for planned features (nothing in src/ reads these yet):
 #   RESEND_API_KEY, DIGEST_FROM                      daily digest email (#9)
 #   LINEAR_API_KEY, TODOIST_API_TOKEN, NOTION_TOKEN  action-item push (#10)

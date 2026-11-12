@@ -7,13 +7,15 @@
 // as anyone with access to your Cloudflare account can read the Worker secrets.
 
 import { json, fail } from './http.js';
+import { sourcesOf, sourcesValue } from './sources.js';
 import {
   MODELS, OPENROUTER_CHAT, OPENROUTER_STT, OPENROUTER_URL, OPENAI_URL, modelsFor, transcribersFor, defaultModel,
 } from './config.js';
 
 export const SETTING_KEYS = [
   'OPENAI_API_KEY', 'LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODELS', 'DEFAULT_MODEL',
-  'STT_BASE_URL', 'STT_API_KEY', 'STT_MODELS', 'VOICE_MATCH', 'POCKET_API_KEY',
+  'STT_BASE_URL', 'STT_API_KEY', 'STT_MODELS', 'VOICE_MATCH', 'POCKET_API_KEY', 'OMI_API_KEY', 'SOURCES',
+  'STT_LANGUAGE', 'HALLUCINATION_GUARD',
 ];
 
 // env + saved settings. Never throws: a missing table must not take the app down.
@@ -41,7 +43,11 @@ export function describe(env) {
   return {
     provider,
     voice_match: env.VOICE_MATCH !== 'off',
+    stt_language: env.STT_LANGUAGE || '',
+    hallucination_guard: env.HALLUCINATION_GUARD !== 'off',
     has_pocket_key: Boolean(env.POCKET_API_KEY), // never the key itself
+    has_omi_key: Boolean(env.OMI_API_KEY),
+    sources: sourcesOf(env),
     chat_models: modelsFor(env).map((m) => m.id),
     default_model: defaultModel(env),
     stt_models: (env.STT_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean),
@@ -67,6 +73,21 @@ function extrasFrom(body) {
   if (pk && (pk.length > 300 || /\s/.test(pk))) return { error: 'that does not look like a Pocket API key' };
   if (pk) kv.POCKET_API_KEY = pk;
   else if (body.pocket_clear === true) kv.POCKET_API_KEY = '';
+  const ok = typeof body.omi_api_key === 'string' ? body.omi_api_key.trim() : '';
+  if (ok && (ok.length > 300 || /\s/.test(ok))) return { error: 'that does not look like an Omi API key' };
+  if (ok) kv.OMI_API_KEY = ok;
+  else if (body.omi_clear === true) kv.OMI_API_KEY = '';
+  if (body.sources !== undefined) {
+    const s = sourcesValue(body.sources);
+    if (s.error) return { error: s.error };
+    kv.SOURCES = s.value;
+  }
+  if (typeof body.stt_language === 'string') {
+    const l = body.stt_language.trim().toLowerCase();
+    if (l && !/^[a-z]{2,3}$/.test(l)) return { error: 'language must be a 2-letter code like en' };
+    kv.STT_LANGUAGE = l;
+  }
+  if (body.hallucination_guard === 'on' || body.hallucination_guard === 'off') kv.HALLUCINATION_GUARD = body.hallucination_guard;
   if (body.voice_match === 'on' || body.voice_match === 'off') kv.VOICE_MATCH = body.voice_match;
   return { kv };
 }

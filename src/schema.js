@@ -65,6 +65,18 @@ export const MIGRATIONS = [
   { id: 8, sql: [
     'CREATE TABLE IF NOT EXISTS brief_acks ( owner TEXT NOT NULL, key TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (owner, key) )',
   ] },
+  // Omi import: the Omi conversation id a row came from (one row per conversation). Imported rows
+  // have no audio, so their r2_key is '' (see src/routes/omi.js).
+  { id: 9, sql: [
+    'ALTER TABLE recordings ADD COLUMN omi_id TEXT',
+    'CREATE UNIQUE INDEX IF NOT EXISTS recordings_omi ON recordings (owner, omi_id)',
+  ] },
+  // Idempotent uploads from a device app (the Bluetooth pendant app retries until the server says yes):
+  // the client's own id for the recording, one row per (owner, ingest_id).
+  { id: 10, sql: [
+    'ALTER TABLE recordings ADD COLUMN ingest_id TEXT',
+    'CREATE UNIQUE INDEX IF NOT EXISTS recordings_ingest ON recordings (owner, ingest_id)',
+  ] },
 ];
 
 // Applies every migration not yet recorded. `db` is a D1 binding (or anything with the

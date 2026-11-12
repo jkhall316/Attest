@@ -153,12 +153,7 @@ export async function showToday(opts) {
       <label class="muted" style="display:flex;align-items:center;gap:6px" title="Write today's brief and the weekly review automatically when you open Attest. Each costs one small model call.">
         <input type="checkbox" id="auto-on" ${autoOn() ? 'checked' : ''}> Write briefs automatically</label>
     </div>
-    <div class="omnibar">${icon('search', 18)}
-      <input id="t-ask" placeholder="Ask anything about everything you have recorded…" aria-label="Ask Attest">
-      ${deepToggle('t-deep')}
-      <button class="primary" id="t-ask-go">Ask</button>
-    </div>
-    ${deepHint('t-deep')}
+    ${omnibarHtml(d.people)}
     ${d.has_recordings ? '' : '<div class="empty">Record or upload something and your day will start to fill in here.</div>'}
     <div class="row" style="justify-content:space-between"><h3>Today's brief</h3><button id="brief-refresh" class="small">Refresh</button></div>
     <div class="card-box" id="brief-card">${briefHtml(d.brief, d.has_recordings ? 'Generating…' : 'Nothing to brief yet.')}</div>
@@ -199,11 +194,70 @@ export async function showToday(opts) {
   autoGenerate(d, mine, date, opts?.regenerate === true);
 }
 
-function wire(d, mine, date) {
+// The Ask omnibar. Modifiers are chip pills under the input: Deep reasoning, a date window and
+// a speaker. With no date or speaker it opens a chat thread over everything; with either one it
+// answers right here from just those recordings (the same scoped call the prompts below use).
+export const DAY_CHOICES = [['', 'Any time'], ['1', 'Last day'], ['7', 'Last 7 days'], ['14', 'Last 14 days'], ['30', 'Last 30 days'], ['60', 'Last 60 days']];
+export function omnibarHtml(people = []) {
+  const chip = (id, ic, label, opts, aria) => `<label class="chip-select" id="${id}-chip">${icon(ic, 13)}<span>${esc(label)}</span>${icon('chevron', 12)}<select id="${id}" aria-label="${aria}">${opts}</select></label>`;
+  const days = DAY_CHOICES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  const who = '<option value="">Any speaker</option>' + people.map((p) => `<option>${esc(p.name)}</option>`).join('');
+  return `<div class="omni">
+    <div class="omnibar">${icon('search', 18)}
+      <input id="t-ask" placeholder="Ask anything about everything you have recorded…" aria-label="Ask Attest" enterkeyhint="search">
+      <button class="primary" id="t-ask-go">Ask</button>
+    </div>
+    <div class="omni-chips">${deepToggle('t-deep')}
+      ${chip('t-days', 'calendar', 'Any time', days, 'Date filter')}
+      ${people.length ? chip('t-who', 'users', 'Any speaker', who, 'Speaker filter') : ''}
+      <span class="omni-scope" id="t-scope"></span></div>
+    ${deepHint('t-deep')}
+    <div id="t-ask-out"></div></div>`;
+}
+
+// What the chips mean, in words, or '' when nothing narrows the question. Pure, for tests.
+export function omniScope(days, who) {
+  if (!days && !who) return '';
+  const span = days ? (days === '1' ? 'the last day' : `the last ${days} days`) : 'the last 60 days';
+  return `Answers here, from ${span}${who ? ` with ${who}` : ''}.`;
+}
+
+function wireOmnibar(date, mine) {
   wireDeep('t-deep');
-  const askGo = () => { const q = $('t-ask').value.trim(); if (q) startChat(q, $('t-deep').checked); };
+  const sync = () => {
+    for (const id of ['t-days', 't-who']) {
+      const sel = $(id);
+      if (!sel) continue;
+      $(id + '-chip').classList.toggle('on', Boolean(sel.value));
+      $(id + '-chip').querySelector('span').textContent = sel.selectedOptions[0]?.textContent || '';
+    }
+    $('t-scope').textContent = omniScope($('t-days').value, $('t-who')?.value || '');
+  };
+  for (const id of ['t-days', 't-who']) if ($(id)) $(id).onchange = sync;
+  const askGo = async () => {
+    const q = $('t-ask').value.trim();
+    if (!q) return;
+    const days = $('t-days').value, person = $('t-who')?.value || '', deep = $('t-deep').checked;
+    if (!days && !person) return startChat(q, deep);
+    const out = $('t-ask-out');
+    $('t-ask-go').disabled = true;
+    out.innerHTML = `<div class="muted">${deep ? 'Researching…' : 'Thinking…'}</div>`;
+    try {
+      const r = await post('/insight', { prompt: q, person, days: Number(days) || 60, date, me: getMe(), deep });
+      if (mine !== token) return;
+      out.innerHTML = `<div class="panel"><div class="md">${md(r.answer)}</div></div>` +
+        (r.sources?.length ? `<div class="muted" style="margin-top:8px">From: ${r.sources.map((x) => esc(x.title)).join(' · ')}</div>` : '');
+    } catch (e) {
+      if (mine === token) out.innerHTML = `<div class="banner">${esc(e.message)}</div>`;
+    }
+    if (mine === token) $('t-ask-go').disabled = false;
+  };
   $('t-ask-go').onclick = askGo;
   $('t-ask').onkeydown = (e) => { if (e.key === 'Enter') askGo(); };
+}
+
+function wire(d, mine, date) {
+  wireOmnibar(date, mine);
   $('auto-on').onchange = () => store.set('auto', $('auto-on').checked ? 'on' : 'off');
   $('brief-refresh').onclick = () => generate('today', date, mine, true);
   $('weekly-refresh').onclick = () => generate('weekly', date, mine, true);
@@ -438,6 +492,7 @@ async function loadPeople(mine, keepNotice = false) {
   }
   $('people-list').innerHTML = people.map((p) => personRow(p, people.filter((o) => o.id !== p.id))).join('')
     || '<div class="muted" style="padding:12px 0">No one yet. People appear here when you name a speaker on a recording.</div>';
+  if (typeof location !== 'undefined' && location.hash === '#people') $('people-list').scrollIntoView(); // a link straight to this section
 
   $('people-suggest').onclick = (e) => {
     const b = e.target.closest('.suggest-go');

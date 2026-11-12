@@ -2,14 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Attest">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="/icons/attest.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <title>Attest</title>
 <script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.18"></script>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header>
-  <h1 id="brand" title="Back to Today">ATTEST</h1>
+  <button id="side-toggle" class="icon ghost side-toggle" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg></button>
+  <h1 id="brand" class="brand" title="Back to Today"><img src="/icons/attest.svg" alt="" width="26" height="26"><span class="wordmark">ATTEST</span></h1>
   <button id="cmdk" class="cmdbtn" title="Search, jump or ask (Cmd/Ctrl+K)" aria-label="Open command palette"><span style="display:flex;align-items:center;gap:8px"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>Search or ask</span><kbd>⌘K</kbd></button>
   <span class="sp"></span>
   <button id="export-all" class="ghost small" title="Bulk export every summary as Markdown">Export all</button>
@@ -29,12 +39,13 @@
     </nav>
     <div class="aside-body">
       <div class="rec-block">
-        <button class="rec primary" id="rec">● Record</button>
-        <div class="rec-sub">
-          <label class="btnlike">Upload audio<input type="file" id="file" accept="audio/*" hidden></label>
-          <button id="pocket" class="small" title="Pull new recordings from your Pocket account and process them">Import from Pocket</button>
+        <div id="mic-block">
+          <button class="rec primary" id="rec">● Record</button>
+          <div class="rec-sub"><label class="btnlike">Upload audio<input type="file" id="file" accept="audio/*" hidden></label></div>
         </div>
+        <div class="rec-sub" id="import-row" style="flex-wrap:wrap"></div>
         <div class="muted" id="pocket-status" style="text-align:center;font-size:12px"></div>
+        <div class="muted" id="source-hint" style="text-align:center;font-size:12px"></div>
         <div class="muted" id="timer" style="text-align:center"></div>
         <div class="muted" id="live" style="font-size:12px;white-space:pre-wrap"></div>
       </div>
@@ -56,6 +67,13 @@
   </aside>
 
   <main id="main"><div class="empty">Loading…</div></main>
+<nav class="tabbar" id="tabbar" aria-label="Main">
+  <button data-tab="home" aria-label="Home"><span class="tab-ic" data-icon="home"></span><span>Home</span><span class="pill error" id="tab-badge"></span></button>
+  <button data-tab="ask" aria-label="Ask"><span class="tab-ic" data-icon="chat"></span><span>Ask</span></button>
+  <button data-tab="record" id="tab-record" class="tab-rec" aria-label="Record"><span class="tab-ic" data-icon="mic"></span><span>Record</span></button>
+  <button data-tab="recordings" aria-label="Library"><span class="tab-ic" data-icon="wave"></span><span>Library</span></button>
+  <button data-tab="settings" aria-label="Settings"><span class="tab-ic" data-icon="gear"></span><span>Settings</span></button>
+</nav>
 </div>
 
 <dialog id="tpl-dialog">

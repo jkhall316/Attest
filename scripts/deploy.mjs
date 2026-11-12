@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ask, confirm, secret } from './lib/prompt.mjs';
 import { OPENROUTER_CHAT, OPENROUTER_STT, OPENROUTER_URL } from '../src/config.js';
-import { setupAccess } from './lib/access.mjs';
+import { setupAccess, deviceInstructions } from './lib/access.mjs';
 import { npx, machineLabel } from './lib/platform.mjs';
 import { DEFAULT_VECTOR_INDEX, localOverrides, overrideLines, mergeConfig } from './lib/merge.mjs';
 
@@ -86,7 +86,20 @@ the automatic login setup, complete Zero Trust onboarding (Free plan). See the R
     });
     remove.push('OPENAI_API_KEY');
   }
-  secrets.POCKET_API_KEY = await secret('Pocket API key (optional)');
+
+  // Which devices feed Attest. Pick as many as you use; the app shows only these, and only the ones
+  // that need a key ask for it. Changeable any time in Settings (the gear icon).
+  console.log('\nWhich of these do you record with? (y/n each; you can change this later in Settings)');
+  const picked = ['mic'];
+  if (!(await confirm('  Record or upload in the Attest app itself', true))) picked.pop();
+  if (await confirm('  Pocket recorder', false)) { picked.push('pocket'); secrets.POCKET_API_KEY = await secret('Pocket API key (optional, can add later in Settings)'); }
+  if (await confirm('  Omi, or a Limitless pendant paired with the Omi app (transcripts)', false)) {
+    picked.push('omi');
+    secrets.OMI_API_KEY = await secret('Omi Developer API key, conversations:read (optional, can add later in Settings)');
+  }
+  if (await confirm('  Limitless pendant over Bluetooth, through the Attest Mac/iPhone app (full audio)', false)) picked.push('pendant');
+  const wantDeviceToken = picked.includes('pendant');
+  secrets.SOURCES = picked.join(',') || 'none';
 
   let access = null;
   if (await confirm('Create the Cloudflare Access login automatically? (needs an API token, see README)')) {
@@ -99,7 +112,7 @@ the automatic login setup, complete Zero Trust onboarding (Free plan). See the R
   const keep = existsSync(LOCAL) ? overrideLines(readFileSync(LOCAL, 'utf8')) : '';
   writeFileSync(LOCAL, `routes = [{ pattern = "${host}", custom_domain = true }]\n${keep ? keep + '\n' : ''}`);
   console.log(`\nWrote ${LOCAL} (gitignored).`);
-  return { host, email, secrets, remove, access };
+  return { host, email, secrets, remove, access, wantDeviceToken };
 }
 
 // Semantic search (optional): a Vectorize index plus a Workers AI binding. wrangler.toml stays
@@ -146,7 +159,15 @@ async function main() {
 
   if (setup.access) {
     try {
-      await setupAccess({ ...setup.access, hostname: setup.host, email: setup.email, log: (m) => console.log('- ' + m) });
+      const acc = await setupAccess({ ...setup.access, hostname: setup.host, email: setup.email, serviceToken: setup.wantDeviceToken, log: (m) => console.log('- ' + m) });
+      if (setup.wantDeviceToken) {
+        // The Worker verifies the device app's Access token against these two values.
+        for (const [name, value] of [['ACCESS_TEAM_DOMAIN', acc.teamDomain], ['ACCESS_AUD', acc.aud]]) {
+          if (!value) { console.log(`! could not read ${name}; the pendant app cannot sign in until you set it: npx wrangler secret put ${name}`); continue; }
+          wrangler(['secret', 'put', name, ...cfg], { input: value + '\n', stdio: ['pipe', 'inherit', 'inherit'] });
+        }
+        console.log(deviceInstructions(setup.host, acc.serviceToken));
+      }
       console.log(`\nDone. Open https://${setup.host}, enter ${setup.email}, and use the emailed code.`);
       console.log('You can delete the API token now (dash.cloudflare.com/profile/api-tokens).');
     } catch (e) {

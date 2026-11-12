@@ -2,7 +2,7 @@
 
 **Record a conversation. Get back who said what, what was decided, what you owe people, and a memory of your work that gets smarter every week.**
 
-Attest is a private, self-hosted voice notebook. Run it on **your own Mac** (with a local model server, nothing leaves the machine) or as a Worker in **your own Cloudflare account**. You record (or upload, or import from a Pocket device), and Attest gives you a speaker-labeled transcript, a summary, action items, mind maps, and a searchable memory of everything you have ever recorded. Then it uses that memory to run your day.
+Attest is a private, self-hosted voice notebook. Run it on **your own Mac** (with a local model server, nothing leaves the machine) or as a Worker in **your own Cloudflare account**. You record (or upload, or import from a Pocket device, an Omi account, or a Limitless pendant), and Attest gives you a speaker-labeled transcript, a summary, action items, mind maps, and a searchable memory of everything you have ever recorded. Then it uses that memory to run your day.
 
 ![Runs on Cloudflare Workers or locally](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers%20or%20your%20Mac-F38020)
 ![No build step](https://img.shields.io/badge/frontend-no%20build%20step-5b8cff)
@@ -39,7 +39,9 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 
 | | What you get | Needs | Details |
 |---|---|---|---|
-| **Record, upload, import** | Browser recorder with live preview and crash recovery, file upload, Pocket import | nothing extra (Pocket needs a key) | [Recording](#recording-uploading-importing) |
+| **Record, upload, import** | Browser recorder with live preview and crash recovery, file upload, Pocket import, Omi import | nothing extra (Pocket and Omi need a key) | [Recording](#recording-uploading-importing) |
+| **Devices you choose** | Tick the ones you use (the app, Pocket, Omi, a Limitless pendant); the main screen, setup and background sync follow your choice | nothing | [Choosing your devices](#choosing-your-devices) |
+| **Phone and Mac app** | Attest in a native shell, a bottom tab bar on phones, and a **Bluetooth pendant sync** with background upload on iPhone | an Apple developer account to run it on your phone | [apple/README.md](apple/README.md) |
 | **Speaker labels** | Who said what, from OpenAI's diarize model or OpenRouter models that label speakers | a labeling transcriber | [Speakers and voices](#speakers-and-voices) |
 | **Evidence-only names** | A name is kept only if a quote proves it; otherwise `Unknown 1..N` | nothing | [Speakers and voices](#speakers-and-voices) |
 | **Voice recognition** | Enrolled voices recognised on any provider, in your browser | a 49 MB model, downloaded once | [Speakers and voices](#speakers-and-voices) |
@@ -59,7 +61,7 @@ Most AI note-takers are a monthly subscription, keep your conversations on someo
 flowchart LR
   S{"Where does<br/>Attest run?"}
 
-  S -->|"Cloudflare Workers"| C1["Record, upload,<br/>or Pocket import"]
+  S -->|"Cloudflare Workers"| C1["Record, upload, or import<br/>(Pocket, Omi, Bluetooth pendant)"]
   C1 --> C2["Hosted transcriber labels speakers<br/>(OpenRouter or OpenAI)"]
   C2 --> M["Match enrolled voices<br/>in your browser"]
   M --> C3["Hosted chat model: summary, action items,<br/>mind maps, unanswered, facts"]
@@ -78,7 +80,7 @@ flowchart LR
   L5 --> G
 ```
 
-**On Cloudflare**, everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket imports and builds memory for older recordings. Start at [Route A](#route-a-cloudflare--openrouter).
+**On Cloudflare**, everything is one Worker with owner-scoped rows. Your browser tab drives processing, and a free 15-minute cron picks up Pocket and Omi imports (the ones you ticked) and builds memory for older recordings. Start at [Route A](#route-a-cloudflare--openrouter).
 
 **On your Mac**, the same Worker runs in Cloudflare's local runtime (`npm run local`) and talks to a model server on your machine. Nothing leaves it, speakers are detected in your browser rather than by the transcriber, and there is no background cron: use **Build memory from past recordings** and **Import from Pocket** instead. Start at [Route B](#route-b-this-mac-only).
 
@@ -94,7 +96,7 @@ Details for both are in [For developers](#for-developers).
 | Costs | about $0.10 per recorded hour | $0 in API fees |
 | Needs | a Cloudflare account **and a domain** on it, an [OpenRouter](https://openrouter.ai/) or [OpenAI](https://platform.openai.com/) key | an Apple Silicon Mac (macOS 15+) with [oMLX](https://github.com/jundot/omlx) |
 | Setup time | about 20 minutes, mostly dashboard clicking | about 15 minutes, mostly waiting for model downloads |
-| Background sync (Pocket) | yes | no |
+| Background sync (Pocket, Omi) | yes | no |
 
 **Both routes need** [Node.js](https://nodejs.org/) 22.12 or newer: the install, the local server and the Cloudflare deploy all run on it. Then get the code and install it. With [Git](https://git-scm.com/downloads):
 
@@ -140,7 +142,7 @@ Want to hack on the code instead? See [Local dev](#local-dev).
 
 Attest ships locked down: it has no public URL until you give it your own hostname, and it refuses every request that has not passed Cloudflare Access. That is deliberate (without it, anyone with the URL would share one set of recordings), so there are a few Cloudflare dashboard steps. The setup wizard (`npm run deploy`) automates everything after them. Until Access is in place the app answers `401` to everyone; that is it failing closed.
 
-**On this page:** [Before you start](#before-you-start) · [1. Enable R2](#1-enable-r2) · [2. Set up Zero Trust](#2-set-up-zero-trust) · [3. API token (optional)](#3-optional-api-token) · [4. Run the wizard](#4-run-the-wizard) · [5a. Test it](#5a-test-it) · [5b. Manual Access setup](#5b-manual-access-setup) · [Semantic search setup](#semantic-search-setup) · [Pocket sync](#background-sync-and-pocket) · [Local dev](#local-dev)
+**On this page:** [Before you start](#before-you-start) · [1. Enable R2](#1-enable-r2) · [2. Set up Zero Trust](#2-set-up-zero-trust) · [3. API token (optional)](#3-optional-api-token) · [4. Run the wizard](#4-run-the-wizard) · [5a. Test it](#5a-test-it) · [5b. Manual Access setup](#5b-manual-access-setup) · [Semantic search setup](#semantic-search-setup) · [Pocket and Omi sync](#background-sync-pocket-and-omi) · [Local dev](#local-dev)
 
 ### Before you start
 
@@ -170,6 +172,7 @@ Create a token so the wizard can set up the login for you. Skip this to do the l
 2. Add two permissions, both under **Account**:
    - **Access: Apps and Policies** with **Edit**
    - **Access: Organizations, Identity Providers, and Groups** with **Edit**
+   - Only if you will use the Bluetooth pendant app, a third: **Access: Service Tokens** with **Edit** (it creates the sign-in the app uses; see [Choosing your devices](#choosing-your-devices))
 3. Account Resources: **Include**, then your account. Create the token and copy it.
 4. You also need your **account id**: dashboard, any zone's Overview page, right column. The wizard tries to detect it.
 
@@ -190,7 +193,9 @@ With no `wrangler.local.toml` yet, `npm run deploy` asks:
 | Hostname (`attest.example.com`) | Written to `wrangler.local.toml` (gitignored) as the Worker's custom domain |
 | Your email | `OWNER_EMAIL` secret, and the address allowed through Access |
 | AI provider (`openrouter`, the default, or `openai`) | OpenRouter: asks for one OpenRouter key plus the chat and transcription model ids, and sets `LLM_*`, `STT_*` and `DEFAULT_MODEL` as secrets. OpenAI: asks for `OPENAI_API_KEY`. Re-run `npm run setup` to switch. |
+| Which devices you use | Asks yes or no for the app itself, Pocket, Omi, and the Bluetooth pendant; stores `SOURCES`. Only the ones you pick ask for a key. Change it later in **Settings** |
 | Pocket API key | `POCKET_API_KEY` secret, optional. You can also add or change it later in **Settings** (the gear icon) |
+| Omi Developer API key | `OMI_API_KEY` secret, optional (`omi_dev_...`, `conversations:read` scope). Also settable later in **Settings** |
 | Create the Access login automatically? | If yes: asks for account id and the [step 3](#3-optional-api-token) token |
 
 Then it deploys (creating the Worker, D1 database, R2 bucket, DNS record, certificate and the 15-minute cron; there is no SQL to run, the Worker creates its own tables on the first request), sets the secrets, and, if you said yes, creates a One-time PIN login method, an "Allow your email" policy, and the Access application on your hostname. It is safe to re-run (`npm run setup` re-asks the questions; existing pieces are reused or updated). Later `npm run deploy` runs just deploy. Your hostname never reaches git.
@@ -227,15 +232,47 @@ This is automatic. Each deploy tries to create a Cloudflare Vectorize index name
 - By hand: `npx wrangler vectorize create attest-memory --dimensions=768 --metric=cosine`, then add `[ai] binding = "AI"` and `[[vectorize]] binding = "VECTORS" index_name = "attest-memory"` to your config.
 - Older recordings catch up on their own via the cron, two per 15 minutes. To do it now, open Today, then Memory, and press **Build memory from N past recordings**. How it all works: [Memory and semantic search](#memory-and-semantic-search).
 
-### Background sync and Pocket
+### Choosing your devices
+
+Tick the ones you use in **Settings** (the gear icon, "Where your recordings come from"), or answer the questions in `npm run setup`. The main screen, the setup questions and the background sync all follow that choice, and you can use as many as you like at once. With nothing chosen yet, Attest shows the app's own recorder plus any device that already has a key, so an older deploy keeps its Pocket button.
+
+| Source | What you get | Needs |
+|---|---|---|
+| **Record or upload in the app** | Browser recorder and file upload | nothing |
+| **Pocket** | Full audio, run through Attest's own transcription and speaker pipeline | a Pocket API key |
+| **Omi**, or a **Limitless pendant paired with the Omi app** | Omi's transcript and speaker turns, summarized by Attest. **No audio**, because Omi's Developer API does not share it (so no playback or voice matching on these rows) | an Omi Developer API key (`omi_dev_...`) with only the `conversations:read` scope, from the Omi app under Settings, Developer Settings |
+| **Limitless pendant over Bluetooth** | Full audio straight from the pendant, through the Attest app for Mac or iPhone in [`apple/`](apple/README.md) | the Attest app, and a Cloudflare Access service token (below) |
+
+With two or more import sources ready, the sidebar also shows **Import from all**. A chosen source that has no key yet still shows its button, marked "(add key)", and opens Settings.
+
+A pendant talks to one phone at a time. If you use it with Omi *and* the Attest app, only one of them can be connected at once, and whichever drains the pendant first takes the audio. Omi's copy of a conversation (transcript) and the Attest app's copy (audio) arrive as separate recordings.
+
+**Omi imports** keep Omi's own speaker turns. Names Omi already knows are kept (as unconfirmed, with "Named in Omi" as the evidence), and placeholders such as "Speaker 0" are ignored. Re-importing is safe: one row per Omi conversation.
+
+#### Sign-in for the Attest app (Bluetooth pendant)
+
+The app cannot do an interactive login, so it uses a **Cloudflare Access service token**. Setup creates it when you tick the pendant. On a deployment that already exists:
+
+```sh
+npm run deploy         # the Worker needs the code that accepts the token
+npm run device-token   # creates the token and prints the Client ID, secret and an attest://connect link
+```
+
+`device-token` needs an API token with the extra **Access: Service Tokens: Edit** permission ([step 3](#3-optional-api-token)). It sets three Worker secrets: `ACCESS_TEAM_DOMAIN` (your `team.cloudflareaccess.com`), `ACCESS_AUD` (the Access application's audience tag), and `OWNER_EMAIL`. The Worker verifies the token's signed JWT against Cloudflare's published keys (audience, issuer and expiry), treats it as you, and **only for two routes**: uploading a recording (`POST /api/recordings`) and `GET /api/meta`. A leaked token cannot read recordings or change settings. Without `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, service tokens are off.
+
+Uploads from a device app may carry `created_at` (when it was actually captured; ignored unless after 2020 and not in the future) and `ingest_id` (the app's own id for the recording: a repeat returns the existing row instead of creating a copy).
+
+On a phone-width screen the web app shows a small bottom bar: **Home, Ask, Record, Recordings, Settings**. The Record button is hidden if you never record in the app.
+
+### Background sync, Pocket and Omi
 
 `wrangler.toml` has a Cron Trigger (`*/15 * * * *`, free on Workers). Each tick does three things:
 
-1. **Memory catch-up.** Builds facts and the semantic index for up to 2 older recordings, with or without Pocket.
-2. **Pocket import.** Imports up to 2 new Pocket recordings from the last 3 days. Does nothing until a Pocket key is saved: paste it in **Settings** (the gear icon, Pocket section), or set the `POCKET_API_KEY` secret.
-3. **Processing.** Processes up to 2 waiting Pocket recordings, so meetings show up transcribed without opening the app.
+1. **Memory catch-up.** Builds facts and the semantic index for up to 2 older recordings, with or without Pocket or Omi.
+2. **Imports.** For each of **Pocket** and **Omi** that you ticked and gave a key, imports up to 2 new recordings from the last 3 days. Does nothing for a source until its key is saved: paste it in **Settings** (the gear icon), or set the `POCKET_API_KEY` / `OMI_API_KEY` secret.
+3. **Processing.** Processes up to 2 waiting Pocket or Omi recordings, so meetings show up transcribed without opening the app. (Omi rows already have a transcript, so this step only summarizes them.)
 
-Because cron has no Access header, set the `OWNER_EMAIL` secret to the email you sign in with (default `local`). Failed Pocket rows are not retried automatically; open one and press Retry. The "Import from Pocket" button still works for pulling something right now (it looks back 7 days). Free-plan CPU limits apply to a tick; if long recordings time out there, a paid plan or the button is the fallback.
+Because cron has no Access header, set the `OWNER_EMAIL` secret to the email you sign in with (default `local`). Failed rows are not retried automatically; open one and press Retry. The "Import from Pocket" and "Import from Omi" buttons still work for pulling something right now (it looks back 7 days). Free-plan CPU limits apply to a tick; if long recordings time out there, a paid plan or the button is the fallback.
 
 ### Local dev
 
@@ -253,7 +290,9 @@ npm run dev
 
 - **Record** in the browser. While you talk, 5-second chunks are transcribed with `gpt-transcribe` for a **live preview**. The preview is only a preview; the final transcript comes from transcribing the whole file. The real audio is also stored in 5-second parts as it is recorded, so if the tab dies the recording shows **Recover audio**, which rebuilds the file. Recording stops itself at 22 MB. The recorder encodes at 32 kbps, about 14 MB an hour.
 - **Upload** an audio file. The cap is 24 MB on OpenAI (just under its 25 MB transcription limit) and **48 MB on OpenRouter**, where larger audio is streamed to the model as base64 JSON straight from R2, never loaded into Worker memory. Longer recordings need splitting; Attest does not chunk.
-- **Import from Pocket** pulls new recordings from a Pocket device or app (needs a Pocket API key, which you add in **Settings**). The cron does this for you in the background; see [Background sync and Pocket](#background-sync-and-pocket).
+- **Import from Pocket** pulls new recordings from a Pocket device or app (needs a Pocket API key, which you add in **Settings**). The cron does this for you in the background; see [Background sync, Pocket and Omi](#background-sync-pocket-and-omi).
+- **Import from Omi** pulls your Omi conversations (also what a Limitless pendant paired with the Omi app produces) as transcripts, with no audio, and Attest summarizes them. See [Choosing your devices](#choosing-your-devices).
+- **Bluetooth pendant**: the Attest app for Mac or iPhone copies audio straight off a Limitless pendant and uploads it as a normal recording. See [apple/README.md](apple/README.md).
 
 Processing happens in your browser tab: transcribe, match voices, then summarize. Leave the tab open until it finishes. If anything fails, press **Retry**: a failed summary resumes from the saved transcript instead of paying for transcription twice.
 
@@ -267,7 +306,7 @@ Attest names speakers in three layers, and none of them is allowed to guess.
 
 Every chip above a transcript is clickable, and opens a dropdown: choose someone Attest already knows (people already on another speaker in this recording are flagged), or type a new name and press Enter to add them. `Sam ✓` was confirmed by you. `Sam ?` is a suggestion (inferred or voice-matched), with the evidence or score on hover. Only your click confirms, and only confirmed speakers can be enrolled.
 
-**Fixing a wrong turn.** Click the speaker's name (the small ▾) on any transcript turn to move that turn to another speaker, or to **+ New speaker**, or to move **all** of that speaker's turns to someone else (which merges a person who was split in two). Confirmed names are never touched, a speaker left with no turns disappears, and a ready recording offers **Re-summarize with names**. This works however the speakers were found.
+**Fixing a wrong turn.** Click the speaker's name (the small ▾) on any transcript turn to move that turn to another speaker, or to **+ New speaker**, or to move **all** of that speaker's turns to someone else (which merges a person who was split in two). Confirmed names are never touched, a speaker left with no turns disappears, and a ready recording offers **Re-summarize with names**. This works however the speakers were found. To start over, **Clear speaker names** sets every speaker on that recording back to `Unknown 1..N`, confirmed names included, and keeps who-spoke-when as it was.
 
 **Naming the same person two ways.** If you call someone "Jeff" in one recording and "Jeff Eberhard" in another, Attest treats them as two people. On Today, the **People** panel lists everyone with how many recordings and voice samples they have, and flags likely duplicates (one name's words all appear in another's, whole words only, so "Al" is never matched with "Alex"). Press **Merge** and the old name becomes the new one everywhere: every recording's speakers and transcript (and the search index), their saved voice samples, and their remembered facts. The old name is kept as an alias. A merge cannot be undone, so Attest asks first.
 
@@ -285,9 +324,14 @@ OpenRouter and Cloudflare offer no speaker-embedding model, and a Worker cannot 
 
 </details>
 
+### Transcription hallucination guard
+
+Speech models invent text over silence and room noise: "Thank you." repeated dozens of times, or words in a script nobody spoke (Russian on an English call). Recordings started and stopped by hand, such as from a Pocket pendant, always have that dead air. Attest removes runs of a repeated phrase and text in an unexpected script before the transcript is saved, and keeps the real speech. It is on by default. Turn it off with `HALLUCINATION_GUARD=off` (or in **Settings**), and set `STT_LANGUAGE` (for example `en`) so text in other scripts is recognised as noise. (Separately, speaker detection ignores phantom text; see [Speakers and voices](#speakers-and-voices).)
+
 ### The interface
 
 - **Command palette.** Press **Cmd/Ctrl+K** (or click the search button in the header) from anywhere: type a question and press Enter to ask Attest, or jump to Today, Ask & chats, Settings, any recording, or one of the ten prompts. The **Deep reasoning** chip changes how the question is asked; hover it for what it means.
+- **On a phone** (under 760 px wide, or inside the Attest app) the sidebar becomes a small bottom bar: **Home** (Today), **Ask**, a raised **Record** button, **Recordings** (the list, import buttons and recorder), and **Settings**. Opening a recording shows it full screen. People rows wrap so names and the Rename and Merge controls fit.
 - **Speaking as.** The chip at the top right is you. Pick yourself from the people Attest knows, or type a name.
 - **Sidebar.** Recordings are grouped Today, Yesterday, Last 7 days and Earlier, each with its duration, who spoke, and a Ready / Processing / Failed status. **Record** pulses (and follows your mic level) while recording. The transcription and summary models sit in a collapsible "Recording options" row, shown as friendly names ("GPT-OSS 20B", "MAI Transcribe 2") with the exact model id in the tooltip.
 - **Audio player.** Play and pause, back and forward 15 seconds, 1x / 1.25x / 1.5x / 2x speed, and a seek bar that shows what has loaded and previews the time as you hover. The server answers HTTP range requests, so jumping anywhere does not download the whole file first.
@@ -362,6 +406,8 @@ Everything is bring-your-own: there is no Attest-run service. Set secrets with `
 | Live preview, voice recognition, memory, Today, export, chats, custom templates | nothing extra | built |
 | Semantic search | Workers AI and Vectorize bindings (see [Semantic search setup](#semantic-search-setup)) | built, optional, free allowances |
 | Import from Pocket | a Pocket API key (a `pk_...` key created in the Pocket app), entered in **Settings** or set as the `POCKET_API_KEY` secret | built, optional |
+| Import from Omi | an Omi Developer API key (`omi_dev_...`, `conversations:read`), entered in **Settings** or set as the `OMI_API_KEY` secret | built, optional (transcripts only) |
+| Bluetooth pendant app | a Cloudflare Access service token (`npm run device-token`): secrets `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_EMAIL` | built, optional |
 | Daily digest email | `RESEND_API_KEY`, `DIGEST_FROM` | planned (#9), placeholder only |
 | Push action items to Linear, Todoist, Notion | `LINEAR_API_KEY`, `TODOIST_API_TOKEN`, `NOTION_TOKEN` | planned (#10), placeholder only |
 | Google Drive / OneDrive export | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | planned (#11), placeholder only |
@@ -428,7 +474,7 @@ On a smaller Mac, a smaller chat model works, but summaries and structured outpu
 | Cost per recorded hour | about $0.10 | $0 in API fees (your hardware and power) |
 | Where your audio and text go | OpenRouter and the transcription provider | nowhere. (The page still loads two scripts from jsDelivr, and the voice model comes from Hugging Face once.) |
 | Reach it from your phone or another computer | yes, behind Cloudflare Access | no, `localhost` only |
-| Background work (Pocket sync, memory catch-up) | yes, a free 15-minute cron | not by itself: use **Build memory from past recordings** and **Import from Pocket**, or [run the job by hand](#other-things-to-know) |
+| Background work (Pocket and Omi sync, memory catch-up) | yes, a free 15-minute cron | not by itself: use **Build memory from past recordings** and **Import from Pocket**, or [run the job by hand](#other-things-to-know) |
 | Transcription | `mai-transcribe-2`, nothing to run | your local Whisper model |
 | Speaker labels | from the transcriber | **detected in your browser by clustering voices** (see below) |
 | [Voice recognition](#speakers-and-voices) | yes | yes |
@@ -502,12 +548,12 @@ npm run local            # http://localhost:8787
 
 ## Settings
 
-Click the **gear icon in the top right** to change things without redeploying: switch between **OpenAI** and **OpenRouter**, tick which chat and transcription models to offer (with prices shown), pick the default model, add any other model id, replace the API key, add or remove your **Pocket** API key (write-only, like the others), and turn **voice recognition** on or off. (Who "I" and "me" mean is the **Speaking as** chip in the header, not in Settings.) **Save** applies the provider and model changes immediately.
+Click the **gear icon in the top right** to change things without redeploying: switch between **OpenAI** and **OpenRouter**, tick which chat and transcription models to offer (with prices shown), pick the default model, add any other model id, replace the API key, add or remove your **Pocket** and **Omi** API key (write-only, like the others), and turn **voice recognition** on or off. (Who "I" and "me" mean is the **Speaking as** chip in the header, not in Settings.) **Save** applies the provider and model changes immediately.
 
 - Saved settings live in the D1 `settings` table and override the same names set at deploy time. Switching to OpenAI clears the OpenRouter values.
 - API keys are write-only: stored in your database, never sent back to the browser (the dialog only says whether one is set). Anyone who can read your D1 database can read them, the same trust level as your Worker secrets.
 - If `OWNER_EMAIL` is set, only that account can save settings.
-- API: `GET /api/settings` and `PUT /api/settings` with `{provider, chat_models[], default_model, stt_models[], api_key?, voice_match?}`.
+- API: `GET /api/settings` and `PUT /api/settings` with `{provider, chat_models[], default_model, stt_models[], api_key?, voice_match?, sources[]?, pocket_api_key?, omi_api_key?}`. `sources` is a list of `mic`, `pocket`, `omi`, `pendant`.
 
 ## Privacy and security
 
@@ -519,6 +565,8 @@ Do these two things when deploying behind Access (the wizard does both):
 - Set the var `REQUIRE_ACCESS = "true"` so a request without the Access header is refused with 401 instead of silently becoming the shared `local` owner.
 
 State-changing requests the browser marks `Sec-Fetch-Site: cross-site` are refused, so another website cannot drive your session.
+
+**Device sign-in.** The one exception to "the owner is whatever Access puts in the email header" is a verified Access *service token* (the Bluetooth pendant app). It acts as `OWNER_EMAIL`, is checked against Cloudflare's signing keys, and is limited to uploading a recording and reading `/api/meta`; every other route refuses it with 403.
 
 **Where your data goes:**
 
@@ -686,7 +734,7 @@ scripts/local-setup.mjs, local-check.mjs, lib/omlx.mjs   local setup and the cap
 
 ### Tests
 
-`npm test` runs `node --test "test/*.test.mjs"` (247 tests, no network; the quoted glob is expanded by Node itself, so it works the same in cmd, PowerShell and sh, and needs Node 21 or newer):
+`npm test` runs `node --test "test/*.test.mjs"` (276 tests, no network; the quoted glob is expanded by Node itself, so it works the same in cmd, PowerShell and sh, and needs Node 21 or newer):
 
 - `unit.test.mjs`: pure helpers: diarization merge, FTS query, export shaping, prompts, the speaker evidence filter, the voice matcher, fact validation, chunking, open-items and talk-balance logic.
 - `routes.test.mjs`: the router against a fake D1 and R2 that derives owner scoping from the bound SQL: dispatch order, owner isolation, the live and recover lifecycle, Today and brief caching, facts, the scheduled run, and the semantic path with a fake Workers AI and Vectorize.

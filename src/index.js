@@ -12,6 +12,8 @@
 //   prompts.js           the summarize prompt
 //   http.js              json/fail/uid/ownerOf
 //   db.js                owner-scoped row access, template resolution
+//   sources.js           which devices the owner uses (app, Pocket, Omi, pendant); drives the UI and the cron
+//   access.js            Cloudflare Access service tokens for the device app (verified JWT, two routes only)
 //   routes/              one module per feature area
 //   zip.js, docx.js      export writers
 
@@ -21,7 +23,7 @@ import { json, fail, ownerOf } from './http.js';
 import { readRow } from './db.js';
 import { effectiveStatus, safeParse } from './text.js';
 import {
-  upload, process as processRecording, audio, remove, voiceMatch, resummarize, setActionDone, speakerTurns, reassign,
+  upload, process as processRecording, audio, remove, voiceMatch, resummarize, setActionDone, speakerTurns, resetSpeakers, reassign,
   liveStart, liveChunk, liveAudio, livePart, liveRecover,
 } from './routes/recordings.js';
 import { listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
@@ -36,6 +38,9 @@ import { getTimings, addTiming } from './timings.js';
 import { withSettings, getSettings, saveSettings, saveExtras } from './settings.js';
 import { runScheduled } from './cron.js';
 import { importPocket } from './routes/pocket.js';
+import { importOmi } from './routes/omi.js';
+import { sourceStates } from './sources.js';
+import { verifyServiceToken, serviceTokenMayCall } from './access.js';
 import { exportAll } from './routes/export.js';
 import { listTemplates, createTemplate, deleteTemplate } from './routes/templates.js';
 
@@ -48,7 +53,7 @@ export default {
 
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
-    const owner = ownerOf(request);
+    let owner = ownerOf(request);
     const m = request.method;
     const rest = pathname.startsWith('/api/recordings/') ? pathname.slice(16) : null;
     const chatRest = pathname.startsWith('/api/chats/') ? pathname.slice('/api/chats/'.length) : null;
@@ -61,6 +66,16 @@ export default {
       env = withLocalBackends(await withSettings(env)); // in-app settings (gear icon) override deploy-time config
       // Cloudflare Access sets the email header; with REQUIRE_ACCESS=true a request
       // without it is refused instead of silently becoming the shared `local` owner.
+      // A device app (the pendant) comes in with an Access service token instead of a login: a verified
+      // token acts as the owner, and only on the few routes a device needs.
+      if (!request.headers.get('cf-access-authenticated-user-email') && env.OWNER_EMAIL) {
+        const svc = await verifyServiceToken(request, env);
+        if (svc) {
+          if (!serviceTokenMayCall(m, pathname)) return fail('this token may only upload recordings', 403);
+          owner = env.OWNER_EMAIL;
+          env = { ...env, REQUIRE_ACCESS: 'false' };
+        }
+      }
       if (env.REQUIRE_ACCESS === 'true' && !request.headers.get('cf-access-authenticated-user-email'))
         return fail('unauthorized', 401);
       // CSRF: a cross-site page must not be able to drive writes with the owner's cookies.
@@ -73,6 +88,7 @@ export default {
           default_model: defaultModel(env), max_upload: maxUpload(env),
           deprecations: deprecations(),
           voice_model: VOICE_MODEL, voice_match_enabled: env.VOICE_MATCH !== 'off', vectors_enabled: vectorsEnabled(env),
+          sources: sourceStates(env),
           local_mode: isLocal(env), diarize_local: isLocal(env) && String(env.LOCAL_DIARIZE) === 'true',
         });
 
@@ -97,7 +113,7 @@ export default {
         })) });
       }
 
-      if (pathname === '/api/recordings' && m === 'POST') return upload(request, env);
+      if (pathname === '/api/recordings' && m === 'POST') return upload(request, env, owner);
 
       /* --- #7 live transcription --- */
       // Collection route (exact pathname), checked ahead of the generic /:id routes
@@ -115,7 +131,8 @@ export default {
       if (pathname.startsWith('/api/memory/') && m === 'PATCH') return patchFact(request, env, owner, pathname.slice('/api/memory/'.length));
       if (pathname.startsWith('/api/memory/') && m === 'DELETE') return deleteFact(env, owner, pathname.slice('/api/memory/'.length));
 
-      if (pathname === '/api/pocket/import' && m === 'POST') return importPocket(request, env, owner);
+      if (pathname === '/api/pocket/import' && m === 'POST') return await importPocket(request, env, owner); // await, so an error thrown inside reaches the catch below
+      if (pathname === '/api/omi/import' && m === 'POST') return await importOmi(request, env, owner);
 
       if (pathname === '/api/templates' && m === 'GET')
         return json({ templates: await listTemplates(env, owner) });
@@ -199,6 +216,9 @@ export default {
 
       if (rest && rest.endsWith('/speaker-turns') && m === 'POST')
         return speakerTurns(request, env, owner, rest.slice(0, -'/speaker-turns'.length));
+
+      if (rest && rest.endsWith('/reset-speakers') && m === 'POST')
+        return resetSpeakers(env, owner, rest.slice(0, -'/reset-speakers'.length));
 
       if (rest && rest.endsWith('/resummarize') && m === 'POST')
         return resummarize(env, rest.slice(0, -'/resummarize'.length), owner);

@@ -1,0 +1,74 @@
+name: Attest
+options:
+  bundleIdPrefix: com.attest
+  deploymentTarget: { iOS: "16.0", macOS: "13.0" }
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Your 10-character Apple team id: `DEVELOPMENT_TEAM=ABCDE12345 xcodegen`, or pick the team in Xcode instead.
+    DEVELOPMENT_TEAM: "${DEVELOPMENT_TEAM}"
+targets:
+  # PendantKit is compiled straight into the project (the same sources the Swift package uses for tests and the
+  # command-line tool). Linking the package from inside its own folder makes Xcode report "Missing package product".
+  PendantKit-iOS:
+    type: library.static
+    platform: iOS
+    sources: [Sources/PendantKit]
+    settings:
+      base: { PRODUCT_NAME: PendantKit, PRODUCT_MODULE_NAME: PendantKit, SKIP_INSTALL: YES }
+  PendantKit-macOS:
+    type: library.static
+    platform: macOS
+    sources: [Sources/PendantKit]
+    settings:
+      base: { PRODUCT_NAME: PendantKit, PRODUCT_MODULE_NAME: PendantKit, SKIP_INSTALL: YES }
+  Attest-iOS:
+    type: application
+    platform: iOS
+    sources: [App/Shared, App/iOS]
+    dependencies: [{ target: PendantKit-iOS }]
+    info:
+      path: App/iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Attest
+        # Dark launch screen, so opening the app does not flash white before the (dark) web app loads.
+        UILaunchScreen: { UIColorName: LaunchBackground }
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: Attest connects to your Limitless pendant over Bluetooth to copy its recordings into your Attest.
+        # Lets the app load a development server on this Mac (http://localhost). Your deployed https address is unaffected.
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
+        UIBackgroundModes: [bluetooth-central, processing]
+        BGTaskSchedulerPermittedIdentifiers: [com.attest.sync]
+        CFBundleURLTypes:
+          - CFBundleURLName: com.attest.connect
+            CFBundleURLSchemes: [attest]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "${ATTEST_BUNDLE_ID}"
+        # App/Shared/Assets.xcassets, rendered from public/icons by ./icons.sh
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+  Attest-macOS:
+    type: application
+    platform: macOS
+    sources: [App/Shared, App/macOS]
+    dependencies: [{ target: PendantKit-macOS }]
+    info:
+      path: App/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: Attest
+        NSBluetoothAlwaysUsageDescription: Attest connects to your Limitless pendant over Bluetooth to copy its recordings into your Attest.
+    entitlements:
+      path: App/macOS/Attest.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.device.bluetooth: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "${ATTEST_BUNDLE_ID}"
+        # App/Shared/Assets.xcassets, rendered from public/icons by ./icons.sh
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

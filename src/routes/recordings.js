@@ -1,6 +1,6 @@
 // Recording lifecycle: upload -> transcribe -> summarize -> read/delete.
 
-import { llmFetch, sttFetch, sttUrl } from '../llm.js';
+import { llmFetch, sttFetch, sttUrl, withRateLimitRetry } from '../llm.js';
 import { sttDiarizes, openRouterSegments, localSegments, usesOpenRouterStt } from '../stt.js';
 import { jsonAudioBody, base64Length, withLength } from '../stream.js';
 import { MAX_UPLOAD, MIN_SEGMENTS_FOR_TURNS, contextChars, localDiarize, maxUpload, modelById, transcriberById, previewTranscriber, defaultModel, effectiveTranscriber } from '../config.js';
@@ -8,6 +8,7 @@ import { json, fail, uid, ownerOf } from '../http.js';
 import { readRow, resolveTemplate } from '../db.js';
 import { diarizeToText, parseJsonLoose, STALE_PROCESSING_MS } from '../text.js';
 import { buildSystemPrompt } from '../prompts.js';
+import { guardOn, cleanText, cleanSegments } from '../hallucination.js';
 import { nameSpeakers, rebuildTranscript, anonymousSpeakers, reassignSegments } from '../speakers.js';
 import { selectVoiceprints, speakerRefsForm, matchedSpeakerRefs, normalizeEmbedding, matchVoices, applyVoiceMatches } from '../voiceprints.js';
 import { VOICE_MODEL } from '../config.js';
@@ -22,12 +23,23 @@ const MAX_LIVE_CHUNK = 2 * 1024 * 1024; // 5s of audio/webm is well under this
 const partsPrefix = (id) => `rec/${id}.parts/`;
 const pad = (n) => String(n).padStart(6, '0');
 
-export async function upload(request, env) {
-  const owner = ownerOf(request);
+export async function upload(request, env, owner = ownerOf(request)) {
   const form = await request.formData();
   const file = form.get('file');
   if (!file || typeof file === 'string') return fail('file field required');
   if (file.size > maxUpload(env)) return fail(`audio must be under ${maxUpload(env) / 1048576}MB`, 413);
+
+  // Device apps (the pendant) upload from an outbox that retries, so a repeat of the same ingest_id
+  // answers with the row it already made instead of creating a second copy.
+  const ingestId = String(form.get('ingest_id') || '').trim().slice(0, 120) || null;
+  if (ingestId) {
+    const dup = await env.DB.prepare('SELECT id FROM recordings WHERE owner = ? AND ingest_id = ?').bind(owner, ingestId).first();
+    if (dup) return json({ id: dup.id, duplicate: true });
+  }
+  // When it was actually captured (a drained pendant recording is hours old). Only believed if it is
+  // plausible: after 2020 and not in the future.
+  const cap = Number(form.get('created_at'));
+  const createdAt = cap > 1577836800000 && cap < Date.now() + 60000 ? Math.round(cap) : Date.now();
 
   const id = uid();
   const key = `rec/${id}`;
@@ -36,20 +48,26 @@ export async function upload(request, env) {
   });
   const templateKey = String(form.get('template') || '');
   const resolvedTemplate = await resolveTemplate(env, owner, templateKey);
-  await env.DB.prepare(
-    `INSERT INTO recordings (id, owner, title, created_at, duration_ms, r2_key, content_type,
-                             status, template, model, transcriber)
-     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?)`
+  const ins = await env.DB.prepare(
+    `INSERT OR IGNORE INTO recordings (id, owner, title, created_at, duration_ms, r2_key, content_type,
+                             status, template, model, transcriber, ingest_id)
+     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?,?)`
   ).bind(
     id, owner,
     String(form.get('title') || '').trim() || 'Untitled recording',
-    Date.now(),
+    createdAt,
     Number(form.get('duration_ms')) || null,
     key, file.type || 'audio/webm',
     resolvedTemplate ? templateKey : 'meeting',
     modelById(form.get('model'), env)?.id || null,
     transcriberById(form.get('transcriber'), env).id,
+    ingestId,
   ).run();
+  if (ins?.meta?.changes === 0) { // two retries raced: keep the first, drop this audio
+    await env.AUDIO.delete(key);
+    const first = await env.DB.prepare('SELECT id FROM recordings WHERE owner = ? AND ingest_id = ?').bind(owner, ingestId).first();
+    return json({ id: first?.id, duplicate: true });
+  }
   return json({ id });
 }
 
@@ -217,18 +235,19 @@ async function transcribeBig(env, rec) {
       method: 'POST', headers: { authorization: `Bearer ${env.STT_API_KEY || env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body,
     });
   };
+  const sendRetrying = (diarize) => withRateLimitRetry(() => send(diarize));
   const boom = async (r) => { throw new Error(`transcribe ${r.status}: ${(await r.text()).slice(0, 300)}`); };
   if (sttDiarizes(env, model)) {
-    let r = await send(true);
+    let r = await sendRetrying(true);
     if (r.ok) {
       const tj = await r.json();
       const segments = openRouterSegments(tj);
       return segments.length ? { tj: { ...tj, segments }, sent: [], diarized: true } : { tj, sent: [], diarized: false };
     }
-    if (r.status < 400 || r.status >= 500) await boom(r);
+    if (r.status < 400 || r.status >= 500 || r.status === 429) await boom(r);
     console.error('diarize rejected on large file, retrying without:', r.status, (await r.text()).slice(0, 300));
   }
-  const r = await send(false);
+  const r = await sendRetrying(false);
   if (!r.ok) await boom(r);
   return { tj: await r.json(), sent: [], diarized: false };
 }
@@ -242,10 +261,14 @@ async function transcribe(env, rec, buf, refs) {
     // OpenAI sniffs the format from the filename extension, so match it to the stored type.
     const ext = ({ 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
       'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/flac': 'flac' })[(rec.content_type || '').split(';')[0]] || 'webm';
-    fd.append('file', new File([buf], `audio.${ext}`, { type: rec.content_type }));
+    // Bare MIME type: some providers 400 on a `;codecs=opus` suffix.
+    fd.append('file', new File([buf], `audio.${ext}`, { type: (rec.content_type || 'audio/webm').split(';')[0].trim() }));
     fd.append('model', rec.transcriber);
     fd.append('response_format', diarized ? 'diarized_json' : 'json');
     if (diarized) fd.append('chunking_strategy', 'auto');
+    // Whisper detects the language from the first seconds; a wrong guess (e.g. Russian on an
+    // English call) makes it loop. STT_LANGUAGE (ISO-639-1, e.g. "en") pins it.
+    if (env.STT_LANGUAGE && !diarized) fd.append('language', String(env.STT_LANGUAGE).trim());
     return { fd, sent: withRefs ? withRefs(fd) : [] };
   };
 
@@ -265,7 +288,11 @@ async function transcribe(env, rec, buf, refs) {
   } else {
     req = build(null);
   }
-  const call = (fd) => sttFetch(env, fd);
+  const call = async (fd) => {
+    const r = await sttFetch(env, fd);
+    if (!r.ok) console.error('stt failed:', r.status, rec.transcriber, rec.content_type, buf.byteLength, (await r.clone().text()).slice(0, 300));
+    return r;
+  };
 
   // OpenRouter models that label speakers (Scribe, Voxtral, MAI...): ask for diarization,
   // then fold the per-word speaker ids into turns. If the model rejects the options or
@@ -285,7 +312,7 @@ async function transcribe(env, rec, buf, refs) {
       console.error('diarize requested but the response had no speaker data; using plain text');
       return { tj, sent: [], diarized: false };
     }
-    if (r.status < 400 || r.status >= 500) throw new Error(`transcribe ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    if (r.status < 400 || r.status >= 500 || r.status === 429) throw new Error(`transcribe ${r.status}: ${(await r.text()).slice(0, 300)}`);
     console.error('diarize rejected, retrying without:', r.status, (await r.text()).slice(0, 300));
     r = await call(mk(false));
     if (!r.ok) throw new Error(`transcribe ${r.status}: ${(await r.text()).slice(0, 300)}`);
@@ -310,6 +337,15 @@ async function transcribe(env, rec, buf, refs) {
     if (segments.length >= 1) return { tj: { ...tj, segments }, sent: [], diarized: true, pendingTurns: segments.length >= MIN_SEGMENTS_FOR_TURNS };
   }
   return { tj, sent, diarized };
+}
+
+// A Whisper hallucination loop: a long transcript made of a few phrases repeated over and over.
+export function isLooped(text) {
+  const words = String(text).toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
+  if (words.length < 60) return false;
+  const grams = new Set();
+  for (let i = 0; i + 3 <= words.length; i++) grams.add(words.slice(i, i + 3).join(' '));
+  return grams.size / (words.length - 2) < 0.15;
 }
 
 export async function process(env, id, owner, { stopAfter, force } = {}) {
@@ -346,6 +382,7 @@ export async function process(env, id, owner, { stopAfter, force } = {}) {
       transcript = rec.transcript;
       speakers = rec.speakers || [];
     } else {
+      if (!rec.r2_key) throw new Error('no audio or transcript to work from');
       const obj = await env.AUDIO.get(rec.r2_key);
       if (!obj) throw new Error('audio object missing from R2');
       // Over the multipart cap on OpenRouter: leave the audio in R2 and stream it.
@@ -354,8 +391,13 @@ export async function process(env, id, owner, { stopAfter, force } = {}) {
       const refs = openaiDiarize ? await selectVoiceprints(env, owner, 4) : [];
       const { tj, sent, diarized, pendingTurns } = await transcribe(env, rec, buf, refs);
       segments = tj.segments || [];
+      if (guardOn(env)) {
+        tj.text = cleanText(tj.text, env.STT_LANGUAGE);
+        segments = cleanSegments(segments, env.STT_LANGUAGE);
+      }
       const rawTranscript = diarized ? diarizeToText(segments) : (tj.text || '').trim();
-      if (!rawTranscript) throw new Error('transcription came back empty');
+      if (!rawTranscript) throw new Error(guardOn(env) ? 'transcription had no real speech (only noise the hallucination guard removed)' : 'transcription came back empty');
+      if (guardOn(env) && isLooped(rawTranscript)) throw new Error('transcription looped on repeated phrases (a speech-model hallucination). Retry, or set STT_LANGUAGE to pin the language.');
       tokensIn += tj.usage?.input_tokens || 0;
       tokensOut += tj.usage?.output_tokens || 0;
 
@@ -548,6 +590,27 @@ export async function resummarize(env, id, owner) {
   return json(await readRow(env, id, owner));
 }
 
+// POST /:id/reset-speakers: clear every speaker name on this recording, confirmed ones too,
+// back to Unknown 1..N. The speaker split (segments) is untouched. voice_match is set to a
+// marker rather than null so opening the recording does not immediately re-suggest names;
+// "Re-detect speakers" still can. A ready recording is told to re-summarize with the new names.
+export async function resetSpeakers(env, owner, id) {
+  const rec = await readRow(env, id, owner);
+  if (!rec) return fail('not found', 404);
+  if (!['ready', 'transcribed'].includes(rec.status)) return fail('recording is not ready', 409);
+  const segments = Array.isArray(rec.segments) ? rec.segments : [];
+  if (!segments.length) return fail('recording has no speakers to reset', 409);
+  const speakers = anonymousSpeakers(segments);
+  const transcript = rebuildTranscript(segments, speakers, rec.transcript);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE recordings SET speakers = ?, transcript = ?, voice_match = ? WHERE id = ? AND owner = ?')
+      .bind(JSON.stringify(speakers), transcript, JSON.stringify({ reset: true, at: Date.now(), scores: [] }), id, owner),
+    env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(id),
+    env.DB.prepare('INSERT INTO transcript_fts (id, title, transcript) VALUES (?,?,?)').bind(id, rec.title, transcript),
+  ]);
+  return json({ ...(await readRow(env, id, owner)), voice_changed: rec.status === 'ready' });
+}
+
 // POST /:id/voice-match {model, speakers:[{label, embedding, speech_ms}]} (#24). The browser
 // computed the embeddings; this decides. Matches are SUGGESTIONS (confirmed:false): they
 // name only unnamed labels and null out an LLM name the voice contradicts.
@@ -606,6 +669,7 @@ export async function voiceMatch(request, env, owner, id) {
 export async function audio(env, id, owner, request) {
   const r = await readRow(env, id, owner);
   if (!r) return fail('not found', 404);
+  if (!r.r2_key) return fail('this recording has no audio', 404);
   const headers = { 'content-type': r.content_type, 'cache-control': 'private, max-age=3600', 'accept-ranges': 'bytes' };
   const m = /^bytes=(\d*)-(\d*)$/.exec(request?.headers?.get('range') || '');
   if (m && (m[1] !== '' || m[2] !== '')) {
@@ -634,7 +698,7 @@ export async function remove(env, id, owner) {
     env.DB.prepare('DELETE FROM recordings WHERE id = ? AND owner = ?').bind(id, owner),
   ]);
   try { await deleteRecordingVectors(env, id, r.vec_chunks); } catch (e) { console.error('vector delete failed:', e?.message || e); }
-  await env.AUDIO.delete(r.r2_key);
+  if (r.r2_key) await env.AUDIO.delete(r.r2_key);
   await deleteParts(env, id);
   return json({ ok: true });
 }

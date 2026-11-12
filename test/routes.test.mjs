@@ -59,6 +59,7 @@ function matcher(where, args) {
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] !== v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*'([^']*)'$/))) return (r) => r[m[1]] === m[2];
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*'([^']*)'$/))) return (r) => r[m[1]] !== m[2];
+    if ((m = c.match(/^(\w+)\s+IS NOT NULL$/i))) return (r) => r[m[1]] != null;
     throw new Error(`fake D1: unsupported condition: ${cond}`);
   });
   return (r) => tests.every((t) => t(r));
@@ -1487,4 +1488,236 @@ test('the auto brief prompt lists acknowledged items so the model does not repea
   try { await call('/api/today/brief', { method: 'POST', body: JSON.stringify({ kind: 'today', date: '2026-11-10' }) }, env); }
   finally { globalThis.fetch = realFetch; }
   assert.match(calls[0].messages[0].content, /already acknowledged[\s\S]*- send the deck to ben/);
+});
+
+test('POST /:id/reset-speakers clears every name (confirmed too), keeps the split, rebuilds the transcript, and is owner-scoped', async () => {
+  const segs = [{ speaker: 'A', text: 'Hi I am Ben.', start: 0, end: 3 }, { speaker: 'B', text: 'Hello Ben.', start: 3, end: 6 }];
+  const { env, store } = fakeEnv({ recordings: [rec({ id: 'r1', status: 'ready', title: 'Call', segments: JSON.stringify(segs),
+    transcript: 'Ben: Hi I am Ben.\nJeff: Hello Ben.',
+    speakers: JSON.stringify([{ label: 'A', name: 'Ben', evidence: 'x', confirmed: true }, { label: 'B', name: 'Jeff', evidence: '', confirmed: false }]) })] });
+  const reset = (owner) => call('/api/recordings/r1/reset-speakers', { method: 'POST' }, env, owner);
+  assert.equal((await reset('someone-else')).status, 404);
+  const res = await reset();
+  assert.equal(res.status, 200);
+  const row = await res.json();
+  assert.ok(row.speakers.every((s) => s.name === null && !s.confirmed));
+  assert.equal(row.speakers.length, 2);
+  assert.match(row.transcript, /Unknown 1: Hi I am Ben\./);
+  assert.match(row.transcript, /Unknown 2: Hello Ben\./);
+  assert.equal(row.voice_changed, true);
+  assert.ok(row.voice_match, 'marker stops auto re-matching on open');
+});
+
+/* --- Omi import --- */
+const OMI_CONV = {
+  id: 'omi-1', started_at: '2026-11-10T15:00:00Z', finished_at: '2026-11-10T15:10:00Z',
+  structured: { title: 'Pricing chat' },
+  transcript_segments: [
+    { text: 'So what should we charge?', speaker_id: 7, start: 0, end: 4 },
+    { text: 'Maybe forty a month.', speaker_id: 2, speaker_name: 'Sam', start: 4, end: 7 },
+    { text: 'That seems fair.', speaker_id: 7, start: 7, end: 9 },
+  ],
+};
+
+test('omiToRow maps Omi segments to lettered speakers, keeps names Omi knows, and ignores placeholders', async () => {
+  const { omiToRow } = await import('../src/routes/omi.js');
+  const row = omiToRow(OMI_CONV);
+  assert.equal(row.title, 'Pricing chat');
+  assert.equal(row.duration_ms, 600000);
+  assert.equal(row.created_at, Date.parse('2026-11-10T15:00:00Z'));
+  assert.deepEqual(row.segments.map((x) => x.speaker), ['A', 'B', 'A'], 'letters follow first appearance');
+  assert.deepEqual(row.speakers.map((x) => [x.label, x.name, x.confirmed]), [['A', null, false], ['B', 'Sam', false]]);
+  assert.match(row.transcript, /^Unknown 1: So what should we charge\?\n\nSam: Maybe forty a month\.\n\nUnknown 1: That seems fair\.$/);
+  const ph = omiToRow({ ...OMI_CONV, transcript_segments: [{ text: 'hi', speaker_id: 0, speaker_name: 'Speaker 0', start: 0, end: 1 }] });
+  assert.equal(ph.speakers[0].name, null, '"Speaker 0" is a placeholder, not a name');
+  assert.equal(ph.duration_ms, 600000, 'falls back to the conversation times');
+  assert.equal(omiToRow({ id: 'x', transcript_segments: [{ text: '  ' }] }), null, 'nothing to summarize');
+  assert.equal(omiToRow({ id: 'x' }), null);
+});
+
+test('POST /api/omi/import refuses cleanly without OMI_API_KEY', async () => {
+  const { env } = fakeEnv();
+  const res = await post('/api/omi/import', {}, env);
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /Omi API key.*Settings/);
+});
+
+test('POST /api/omi/import saves audio-less transcribed rows once, owner-scoped, then summarizes them without any audio', async () => {
+  const { env, store, violations } = fakeEnv({ recordings: [rec({ id: 'old', omi_id: 'omi-0' })] });
+  env.OMI_API_KEY = 'omi_dev_abc';
+  const seen = [];
+  const impl = async (url, init) => {
+    const u = new URL(url);
+    seen.push(u.host + u.pathname + u.search);
+    if (u.host === 'api.omi.me') {
+      assert.equal(init.headers.authorization, 'Bearer omi_dev_abc');
+      if (u.pathname === '/v1/dev/user/conversations')
+        return new Response(JSON.stringify([{ id: 'omi-0' }, { id: 'omi-1' }, { id: 'omi-2' }]), { headers: { 'x-omi-has-more': 'false' } });
+      if (u.pathname.endsWith('/omi-1')) return new Response(JSON.stringify(OMI_CONV));
+      if (u.pathname.endsWith('/omi-2')) return new Response(JSON.stringify({ id: 'omi-2', transcript_segments: [] }));
+    }
+    return llmJson({ summary: 'Pricing discussion', action_items: [], mindmap: { topic: 't', children: [] } })(url, init);
+  };
+  const res = await withFetch(() => post('/api/omi/import', {}, env), impl);
+  const out = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(out.imported.length, 1, 'omi-0 was already imported');
+  assert.deepEqual(out.skipped.map((x) => x.reason), ['no transcript']);
+  assert.equal(out.remaining, 0);
+  assert.ok(seen.every((x) => !/omi-0/.test(x)), 'an already-imported conversation is not fetched again');
+  const row = store.recordings.find((r) => r.omi_id === 'omi-1');
+  assert.equal(row.owner, ME);
+  assert.equal(row.status, 'transcribed');
+  assert.equal(row.r2_key, '');
+  assert.equal(JSON.parse(row.segments).length, 3);
+
+  // a second run finds nothing new
+  const again = await (await withFetch(() => post('/api/omi/import', {}, env), impl)).json();
+  assert.equal(again.imported.length, 0);
+
+  // processing summarizes the imported transcript: no R2 read, no speech-to-text call
+  const proc = await withFetch(() => post(`/api/recordings/${row.id}/process`, {}, env), impl);
+  assert.equal(proc.status, 200);
+  assert.equal((await proc.json()).status, 'ready');
+  assert.ok(!seen.some((x) => /transcriptions/.test(x)), 'no transcription request');
+
+  // no audio: the audio route says so instead of asking R2 for ""
+  assert.equal((await call(`/api/recordings/${row.id}/audio`, {}, env)).status, 404);
+  const detail = await (await call(`/api/recordings/${row.id}`, {}, env)).json();
+  assert.equal(detail.has_audio, false);
+  assert.equal((await call(`/api/recordings/${row.id}`, { method: 'DELETE' }, env)).status, 200, 'deleting never touches R2 for an empty key');
+  assert.deepEqual(violations, []);
+});
+
+test('POST /api/omi/import turns Omi auth failures into actionable errors', async () => {
+  const { env } = fakeEnv();
+  env.OMI_API_KEY = 'bad';
+  const r = await withFetch(() => post('/api/omi/import', {}, env), async () => new Response('{}', { status: 401 }));
+  assert.equal(r.status, 502);
+  assert.match((await r.json()).error, /Omi rejected that API key/);
+  const f = await withFetch(() => post('/api/omi/import', {}, env), async () => new Response('{}', { status: 403 }));
+  assert.match((await f.json()).error, /conversations:read/);
+});
+
+test('settings extras: the Omi key is write-only, validated, and clearable', async () => {
+  const { env, store } = fakeEnv();
+  const put = (b, o) => call('/api/settings/extras', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }, env, o);
+  assert.equal((await put({ omi_api_key: 'has space' })).status, 400);
+  const out = await (await put({ omi_api_key: ' omi_dev_x ' })).json();
+  assert.equal(out.has_omi_key, true);
+  assert.ok(!JSON.stringify(out).includes('omi_dev_x'));
+  assert.equal(store.settings.find((r) => r.key === 'OMI_API_KEY').value, 'omi_dev_x');
+  assert.equal((await (await put({ omi_clear: true })).json()).has_omi_key, false);
+});
+
+/* --- choosing sources --- */
+test('sources: default to the mic plus any source that already has a key; a saved choice wins', async () => {
+  const { sourcesOf, sourceStates, sourcesValue } = await import('../src/sources.js');
+  assert.deepEqual(sourcesOf({}), ['mic']);
+  assert.deepEqual(sourcesOf({ POCKET_API_KEY: 'k' }), ['mic', 'pocket'], 'an older deploy keeps its Pocket button');
+  assert.deepEqual(sourcesOf({ SOURCES: 'omi,pocket', POCKET_API_KEY: 'k' }), ['pocket', 'omi'], 'canonical order, unknown ids ignored');
+  assert.deepEqual(sourcesOf({ SOURCES: 'none', POCKET_API_KEY: 'k' }), [], 'deliberately empty stays empty');
+  assert.deepEqual(sourceStates({ SOURCES: 'mic,omi,pendant' }).map((s) => [s.id, s.ready]), [['mic', true], ['omi', false], ['pendant', true]],
+    'a chosen import source with no key yet is shown but not ready');
+  assert.deepEqual(sourcesValue(['omi', 'mic']), { value: 'mic,omi' });
+  assert.deepEqual(sourcesValue([]), { value: 'none' });
+  assert.match(sourcesValue(['nope']).error, /unknown source/);
+  assert.match(sourcesValue('mic').error, /list/);
+});
+
+test('settings extras: choosing sources is saved, validated, owner-only, and shows up in /api/meta', async () => {
+  const { env, store } = fakeEnv();
+  const put = (b, o) => call('/api/settings/extras', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }, env, o);
+  assert.equal((await put({ sources: ['mic', 'bogus'] })).status, 400);
+  const out = await (await put({ sources: ['pocket', 'omi', 'mic'] })).json();
+  assert.deepEqual(out.sources, ['mic', 'pocket', 'omi']);
+  assert.equal(store.settings.find((r) => r.key === 'SOURCES').value, 'mic,pocket,omi');
+  const meta = await (await call('/api/meta', {}, env)).json();
+  assert.deepEqual(meta.sources.map((s) => s.id), ['mic', 'pocket', 'omi']);
+  assert.deepEqual(meta.sources.map((s) => s.ready), [true, false, false], 'no keys yet');
+  await put({ sources: [] });
+  assert.deepEqual((await (await call('/api/meta', {}, env)).json()).sources, []);
+  env.OWNER_EMAIL = ME;
+  assert.equal((await put({ sources: ['mic'] }, OTHER)).status, 403);
+});
+
+test('the scheduled run only syncs the sources that are chosen', async () => {
+  const { runScheduled } = await import('../src/cron.js');
+  const seen = [];
+  const impl = async (url) => { seen.push(new URL(url).host); return new Response('[]', { status: 200 }); };
+  for (const [sources, want] of [['mic', []], ['omi', ['api.omi.me']], ['pocket,omi', ['public.heypocketai.com', 'api.omi.me']]]) {
+    seen.length = 0;
+    const { env } = fakeEnv();
+    Object.assign(env, { OWNER_EMAIL: ME, POCKET_API_KEY: 'p', OMI_API_KEY: 'o', SOURCES: sources });
+    try { await withFetch(() => runScheduled(env), impl); } catch { /* the fake database cannot run the processing query */ }
+    assert.deepEqual([...new Set(seen)].sort(), want.sort(), `SOURCES=${sources}`);
+  }
+});
+
+/* --- device uploads (the pendant app) --- */
+test('POST /api/recordings keeps the capture time and answers a retried ingest_id with the row it already made', async () => {
+  const { env, store, audio } = fakeEnv();
+  const captured = Date.parse('2026-11-10T15:00:00Z');
+  const send = (extra = {}) => {
+    const fd = new FormData();
+    fd.append('file', new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/ogg' }), 'p.ogg');
+    fd.append('title', 'Pendant');
+    for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+    return call('/api/recordings', { method: 'POST', body: fd }, env);
+  };
+  const a = await (await send({ created_at: String(captured), ingest_id: 'pendant:1', duration_ms: '60000' })).json();
+  assert.ok(a.id && !a.duplicate);
+  assert.equal(store.recordings[0].created_at, captured, 'captured time, not upload time');
+  assert.equal(store.recordings[0].ingest_id, 'pendant:1');
+  const b = await (await send({ ingest_id: 'pendant:1' })).json();
+  assert.deepEqual(b, { id: a.id, duplicate: true });
+  assert.equal(store.recordings.length, 1);
+  assert.equal(Object.keys(audio).length, 1, 'the repeat stored no second copy of the audio');
+  await send({ created_at: String(Date.now() + 86400000) }); // future: not believed
+  await send({ created_at: '5' });                              // before 2020: not believed
+  assert.ok(store.recordings.slice(1).every((r) => r.created_at > Date.now() - 60000 && r.created_at < Date.now() + 5000));
+});
+
+/* --- Access service tokens (device apps) --- */
+async function accessFixture() {
+  const kp = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  const jwk = { ...(await crypto.subtle.exportKey('jwk', kp.publicKey)), kid: 'k1', alg: 'RS256' };
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const sign = async (claims, head = { alg: 'RS256', kid: 'k1' }) => {
+    const body = `${enc(head)}.${enc(claims)}`;
+    const sig = Buffer.from(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', kp.privateKey, new TextEncoder().encode(body))).toString('base64url');
+    return `${body}.${sig}`;
+  };
+  const claims = (o = {}) => ({ aud: ['AUD123'], iss: 'https://team.cloudflareaccess.com', exp: Date.now() / 1000 + 600, common_name: 'client.access', ...o });
+  const fetchImpl = async (url) => (String(url).endsWith('/cdn-cgi/access/certs') ? new Response(JSON.stringify({ keys: [jwk] })) : new Response('x', { status: 404 }));
+  return { sign, claims, fetchImpl };
+}
+
+test('Access service tokens: a verified token acts as the owner, but only to upload and read /api/meta', async () => {
+  const { sign, claims, fetchImpl } = await accessFixture();
+  const { env, store } = fakeEnv();
+  Object.assign(env, { REQUIRE_ACCESS: 'true', OWNER_EMAIL: ME, ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', ACCESS_AUD: 'AUD123' });
+  const withJwt = (jwt, path, init = {}) => withFetch(() => call(path, { ...init, headers: { 'cf-access-jwt-assertion': jwt, ...(init.headers || {}) } }, env, null), fetchImpl);
+  const upload = () => { const fd = new FormData(); fd.append('file', new Blob([new Uint8Array([1])], { type: 'audio/ogg' }), 'a.ogg'); return { method: 'POST', body: fd }; };
+
+  const good = await sign(claims());
+  assert.equal((await withJwt(good, '/api/meta')).status, 200);
+  const up = await withJwt(good, '/api/recordings', upload());
+  assert.equal(up.status, 200);
+  assert.equal(store.recordings[0].owner, ME, 'saved as the owner');
+  assert.equal((await withJwt(good, '/api/recordings')).status, 403, 'cannot list recordings');
+  assert.equal((await withJwt(good, '/api/settings')).status, 403, 'cannot read settings');
+  assert.equal((await withJwt(good, '/api/export')).status, 403);
+
+  for (const [why, jwt] of [
+    ['expired', await sign(claims({ exp: Date.now() / 1000 - 10 }))],
+    ['wrong audience', await sign(claims({ aud: ['other'] }))],
+    ['wrong issuer', await sign(claims({ iss: 'https://evil.example' }))],
+    ['a person, not a service token', await sign(claims({ common_name: undefined, email: ME }))],
+    ['unknown key id', await sign(claims(), { alg: 'RS256', kid: 'nope' })],
+    ['alg none', 'eyJhbGciOiJub25lIn0.' + Buffer.from(JSON.stringify(claims())).toString('base64url') + '.'],
+    ['tampered', good.slice(0, -4) + 'AAAA'],
+  ]) assert.equal((await withJwt(jwt, '/api/meta')).status, 401, why);
+
+  assert.equal((await call('/api/meta', { headers: { 'cf-access-jwt-assertion': good } }, { ...env, ACCESS_AUD: '' }, null)).status, 401, 'off without ACCESS_AUD');
 });

@@ -9,3 +9,11 @@ wrangler.local.toml
 !.env.example
 .DS_Store
 .claude/
+
+# Swift build output and the generated Xcode project (regenerate with: cd apple && xcodegen)
+apple/.build/
+apple/build/
+apple/Attest.xcodeproj/
+apple/App/iOS/Info.plist
+apple/App/macOS/Info.plist
+apple/App/macOS/Attest.entitlements

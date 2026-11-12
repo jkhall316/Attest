@@ -7,7 +7,8 @@ import { refresh } from './lists.js';
 import { open } from './recordings.js';
 import { showAsk } from './chats.js';
 import { startStop, submit } from './recorder.js';
-import { importPocket } from './pocket.js';
+import { renderSources } from './sources.js';
+import { wireTabbar } from './tabbar.js';
 import { loadTemplates, wireTemplateDialog } from './templates.js';
 import { fillSelects, wireSettings } from './settings.js';
 import { showToday } from './today.js';
@@ -25,7 +26,7 @@ import { wirePersona } from './persona.js';
 
   $('rec').onclick = startStop;
   $('file').onchange = (e) => e.target.files[0] && submit(e.target.files[0]);
-  $('pocket').onclick = importPocket;
+  renderSources(state.META.sources);
   $('export-all').onclick = () => location.href = '/api/export';
   $('export-zip').onclick = () => location.href = '/api/export?format=zip';
 
@@ -38,7 +39,29 @@ import { wirePersona } from './persona.js';
   $('home').onclick = showToday;
   $('brand').onclick = showToday;
   $('nav-ask').onclick = showAsk;
+  wireTabbar();
+  wireSideToggle();
 
   await refresh();
   showToday();
 })();
+
+// Desktop: collapse the sidebar to give a recording the full width. Remembered per browser.
+function wireSideToggle() {
+  const btn = $('side-toggle');
+  if (!btn) return;
+  const KEY = 'attest.side';
+  const apply = (collapsed) => {
+    document.body.classList?.toggle('side-collapsed', collapsed);
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.title = btn.ariaLabel = collapsed ? 'Show sidebar' : 'Collapse sidebar';
+  };
+  let saved = '';
+  try { saved = localStorage.getItem(KEY) || ''; } catch { /* private window */ }
+  apply(saved === 'collapsed');
+  btn.onclick = () => {
+    const collapsed = !document.body.classList?.contains('side-collapsed');
+    apply(collapsed);
+    try { localStorage.setItem(KEY, collapsed ? 'collapsed' : ''); } catch { /* private window */ }
+  };
+}

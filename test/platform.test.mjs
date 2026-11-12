@@ -81,3 +81,15 @@ test('recommendedIndex on Windows finds LM Studio and Ollama names for the same 
   assert.deepEqual(missingRecommended(ollama, 'win32'), ['stt'], 'transcription is on a separate server');
   assert.deepEqual(missingRecommended(['Systran/faster-whisper-large-v3']), ['chat', 'stt', 'embedding'], 'no platform: judged by the Mac list, where only the -asr Whisper counts');
 });
+
+// Windows cannot spawn npx.cmd directly: every script must go through platform.mjs's npx().
+test('no script spawns npx directly or uses the Windows-broken entry check', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const files = [...readdirSync('scripts').filter((f) => f.endsWith('.mjs')).map((f) => `scripts/${f}`),
+    ...readdirSync('scripts/lib').filter((f) => f.endsWith('.mjs') && f !== 'platform.mjs').map((f) => `scripts/lib/${f}`)];
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8');
+    assert.doesNotMatch(src, /spawnSync\(\s*['"]npx['"]/, `${f} spawns npx directly`);
+    assert.doesNotMatch(src, /import\.meta\.url\s*===/, `${f} uses the entry check that never matches on Windows`);
+  }
+});
