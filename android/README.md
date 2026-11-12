@@ -46,6 +46,26 @@ Or copy the APK to the phone and open it; Android asks you to allow installing f
 
 A debug build is signed with your computer's debug key, which is fine for your own phone. To hand the app to other people or publish it, build a release with your own key (Android Studio > Build > Generate Signed App Bundle or APK). For Google Play the application id `com.attest.app` will be taken: change it in `app/build.gradle.kts` and `res/xml/shortcuts.xml`.
 
+## Publishing (F-Droid, Google Play)
+
+Not published anywhere yet. The pieces both stores read are here:
+
+- `fastlane/metadata/android/en-US/` holds the store title, descriptions, changelog, icon and screenshots. F-Droid reads them straight from the repo, and they can be uploaded to Play.
+- `fdroid/com.attest.app.yml` is a draft F-Droid build recipe.
+
+**F-Droid** (free, builds from this source):
+1. Tag the release commit: `git tag android-v0.1 && git push origin android-v0.1`. Bump `versionCode`/`versionName` in `app/build.gradle.kts`, and add `changelogs/<versionCode>.txt`, for each later release.
+2. Fork https://gitlab.com/fdroid/fdroiddata and copy the recipe to `metadata/com.attest.app.yml`. Check it with `fdroid lint` / `fdroid build -v -l com.attest.app` if you have fdroidserver, then open a merge request. Alternatively, open a "Request for packaging" issue at https://gitlab.com/fdroid/rfp and let the F-Droid volunteers do it.
+3. F-Droid signs the APK with its own key, and updates follow new `android-v*` tags automatically.
+
+**Google Play:**
+- A unique application id (change it in `app/build.gradle.kts` and `res/xml/shortcuts.xml` *before* the first release on any store, because it can never change afterwards).
+- A release signing key kept out of the repo, and an `.aab` (`./gradlew bundleRelease`).
+- A privacy policy URL.
+- The Data safety and content rating forms.
+- A demo Attest server with a login for the reviewers.
+- Personal developer accounts created after November 2023 must first run a closed test with 12+ testers for 14 days in a row.
+
 ## Point it at your Attest
 
 The app is a window onto **your own Attest**, so that comes first.

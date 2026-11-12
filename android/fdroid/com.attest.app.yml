@@ -1,0 +1,29 @@
+# Draft F-Droid build recipe. It is not used by this repo: whoever submits Attest to F-Droid copies it to
+# metadata/<applicationId>.yml in https://gitlab.com/fdroid/fdroiddata (rename the file if the
+# applicationId changes) and opens a merge request. See android/README.md > Publishing.
+# Before submitting, tag the release commit, e.g.: git tag android-v0.1 && git push origin android-v0.1
+
+Categories:
+  - Productivity
+License: MIT
+AuthorName: Jeff Eberhard
+SourceCode: https://github.com/techjeffe/Attest
+IssueTracker: https://github.com/techjeffe/Attest/issues
+
+AutoName: Attest
+
+RepoType: git
+Repo: https://github.com/techjeffe/Attest.git
+
+Builds:
+  - versionName: '0.1'
+    versionCode: 1
+    commit: android-v0.1
+    subdir: android/app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version android-v%v
+UpdateCheckMode: Tags ^android-v
+CurrentVersion: '0.1'
+CurrentVersionCode: 1

@@ -21,6 +21,11 @@ android {
             isMinifyEnabled = false
         }
     }
+    // No encrypted dependency report in the APK: only Google can read it, and F-Droid rejects it.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

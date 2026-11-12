@@ -1,0 +1,14 @@
+<p>Attest records your conversations and turns them into a transcript with speaker labels, a summary, action items and a mind map, then lets you ask questions across everything you have recorded, with citations.</p>
+
+<p><b>You need your own Attest server.</b> This app is a window onto it. Attest is open source and runs in your own Cloudflare account, or entirely on your own computer with local AI models. Set it up first on a computer: <a href="https://github.com/techjeffe/Attest">github.com/techjeffe/Attest</a>.</p>
+
+<p>On your phone:</p>
+<ul>
+<li>The whole Attest app with a phone layout: Home, Ask, Record, Library and Settings.</li>
+<li>Record from the Record tab.</li>
+<li><b>Share &gt; Upload to Attest</b> from any app (a voice recorder, Files, a messaging app). Uploads run in the background, wait for a network, survive the app closing and keep retrying for up to two days.</li>
+<li>Export summaries as Markdown or Word, or print and save them as PDF.</li>
+<li>One-tap setup with the connect link that Attest's setup prints.</li>
+</ul>
+
+<p>Privacy: the app talks only to the server you choose. It has no analytics, no ads and no tracking. Your recordings go to your own Attest and nowhere else. The access-token secret is encrypted with a key kept in the Android Keystore.</p>

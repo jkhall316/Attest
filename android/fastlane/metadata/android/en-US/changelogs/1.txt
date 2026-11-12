@@ -1,0 +1,1 @@
+First release: the Attest web app with the phone layout, recording, Share > Upload to Attest with background upload, exports, Print / Save as PDF, and one-tap setup links.
