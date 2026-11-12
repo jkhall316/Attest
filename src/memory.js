@@ -86,3 +86,10 @@ export function buildChunks(rec, facts) {
   for (const c of chunkText(rec.transcript)) chunks.push({ kind: 'transcript', text: c });
   return chunks.map((c, n) => ({ ...c, id: `${rec.id}:${n}`, text: c.text.slice(0, 1500) }));
 }
+
+// A fact about someone nobody has named (person is null: the speaker was "Unknown N") stays on the Memory
+// list for a week after the recording, long enough to tag the speaker and have it name them. After that
+// it leaves the list and the daily brief but is NOT deleted: it stays in the database and in the semantic
+// index, so Ask can still find it. A fact with a named person is always listed.
+export const UNTAGGED_LISTED_MS = 7 * 86400000;
+export const isListedFact = (f, now = Date.now()) => Boolean(f?.person) || now - Number(f?.created_at || 0) <= UNTAGGED_LISTED_MS;

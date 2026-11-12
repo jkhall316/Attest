@@ -400,3 +400,22 @@ dialog[open] { animation:pop-in .16s ease-out }
   input, select, textarea { font-size:16px }
   .mm-card.full { inset:0; border-radius:0; padding-top:var(--safe-t); padding-bottom:var(--safe-b) }
 }
+
+/* ---------- Today: brief first, reminders beside it ---------- */
+.today-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:28px; margin-top:18px; align-items:start }
+@media (min-width:1100px) { .today-grid { grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr) } .today-side { position:sticky; top:0; max-height:calc(100vh - var(--header-h) - 60px); overflow-y:auto; padding-right:4px } }
+.today-main, .today-side { min-width:0 }
+.brief-hero { margin-top:10px; font-size:15.5px; line-height:1.65; padding:24px 28px }
+.brief-hero .sect { margin-bottom:12px }
+.brief-hero .sect > summary { font-size:15px; font-weight:600 }
+.brief-hero .sect-body { padding-top:8px }
+.brief-hero li { margin:7px 0 }
+.brief-hero .md strong { color:var(--text-primary, inherit) }
+.stats { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px }
+.stat { font-size:12.5px; padding:3px 10px; border-radius:999px; border:1px solid var(--border-subtle); color:var(--text-secondary) }
+.stat b { font-size:13.5px }
+.stat.bad { border-color:var(--bad); color:var(--bad) } .stat.warn { border-color:#d97706; color:#d97706 }
+.reminders .bucket { margin-top:14px } .reminders .bucket:first-child { margin-top:8px }
+.bucket-h { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); margin:0 0 4px; font-weight:600 }
+.bucket-overdue .bucket-h { color:var(--bad) } .bucket-today .bucket-h { color:#d97706 }
+.today-main .omnibar { margin-top:22px }

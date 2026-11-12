@@ -139,7 +139,8 @@ export async function process(r, { force = false } = {}) {
 export function noteHtml(md_, open_ = true) {
   const parts = sections(md_);
   if (!parts) return `<div class="md">${md(md_)}</div>`;
-  return parts.map((p) => !p.title
+  // a brief that opens with just a title line ("# Today's Brief") would show as an empty card: drop it
+  return parts.filter((p, i) => !(i === 0 && p.title && !p.body)).map((p) => !p.title
     ? `<div class="md" style="margin-bottom:10px">${md(p.body)}</div>`
     : `<details class="sect"${open_ ? ' open' : ''}><summary><span class="tag">${icon(iconForSection(p.title), 15)}</span>${esc(p.title)}<span class="chev">${icon('chevron', 16)}</span></summary>
         <div class="sect-body md">${md(p.body)}</div></details>`).join('');

@@ -551,7 +551,7 @@ export async function reshapeNow(env, owner, id) {
   if (!['ready', 'transcribed'].includes(rec.status) || !rec.transcript) return fail('recording is not ready', 409);
   let buf = null;
   if (rec.r2_key) { const o = await env.AUDIO.get(rec.r2_key); if (o && o.size <= MAX_AUDIO_BYTES) buf = await o.arrayBuffer(); }
-  const kids = await reshapeAfterTranscript(env, owner, rec, { segments: rec.segments || [], speakers: rec.speakers || [], buf });
+  const kids = await reshapeAfterTranscript(env, owner, rec, { segments: rec.segments || [], speakers: rec.speakers || [], buf, keepStatus: true });
   if (!kids) return json({ changed: false });
   try { return json({ changed: true, ...(await finishShaped(env, owner, kids, undefined, true)) }); }
   catch (e) { return fail(String(e?.message || e).slice(0, 300), 502); }

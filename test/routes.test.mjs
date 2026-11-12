@@ -58,6 +58,7 @@ function matcher(where, args) {
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] === v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*!=\s*\?$/))) { const v = args.shift(); return (r) => r[m[1]] !== v; }
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*'([^']*)'$/))) return (r) => r[m[1]] === m[2];
+    if ((m = c.match(/^(?:\w+\.)?(\w+)\s+IN\s*\(([?,\s]+)\)$/i))) { const n = (m[2].match(/\?/g) || []).length; const set = new Set(args.splice(0, n)); return (r) => set.has(r[m[1]]); }
     // numeric literal (hidden = 0): a row that predates the column counts as 0
     if ((m = c.match(/^(?:\w+\.)?(\w+)\s*=\s*(\d+)$/))) return (r) => (r[m[1]] ?? 0) === Number(m[2]);
     if ((m = c.match(/^(\w+)\s+LIKE\s+\?$/i))) { const pat = String(args.shift()).replace(/%/g, ''); return (r) => String(r[m[1]] ?? '').includes(pat); }
@@ -1013,7 +1014,7 @@ test('summarize stores verified facts (non-verbatim quotes are dropped), and a r
 });
 
 test('GET /api/memory filters by person and kind, is owner-scoped; PATCH ticks; DELETE removes', async () => {
-  const mk = (id, owner, kind, person) => ({ id, owner, recording_id: 'm1', kind, person, text: id, quote: 'q', done: 0, created_at: 1 });
+  const mk = (id, owner, kind, person) => ({ id, owner, recording_id: 'm1', kind, person, text: id, quote: 'q', done: 0, created_at: person ? 1 : Date.now() });
   const { env, store } = fakeEnv({ recordings: [memRec()], facts: [
     mk('f1', ME, 'commitment', 'Ben'), mk('f2', ME, 'decision', null), mk('f3', OTHER, 'decision', 'Ben')] });
   const all = await (await call('/api/memory', {}, env)).json();
@@ -2003,4 +2004,41 @@ test('undoing a merge of merges unwinds to the original pieces, and they are not
   assert.deepEqual((await res.json()).restored.sort(), ['a', 'b', 'c']);
   assert.deepEqual(store.recordings.map((r) => [r.id, r.hidden ?? 0]).sort(), [['a', 0], ['b', 0], ['c', 0]]);
   assert.equal((await consolidate(env, ME)).size, 0);
+});
+
+test('memory: a fact about an unnamed speaker is listed for a week, then leaves the list and the brief but stays stored', async () => {
+  const day = 86400000, now = Date.now();
+  const mk = (id, person, age) => ({ id, owner: ME, recording_id: 'm1', kind: 'decision', person, text: id, quote: 'q', done: 0, created_at: now - age * day });
+  const { env, store } = fakeEnv({ recordings: [memRec({ created_at: now - day })], facts: [
+    mk('named-old', 'Ben', 30), mk('unnamed-new', null, 2), mk('unnamed-old', null, 8), mk('named-new', 'Ben', 1)] });
+  const list = await (await call('/api/memory', {}, env)).json();
+  assert.deepEqual(list.facts.map((f) => f.id).sort(), ['named-new', 'named-old', 'unnamed-new']);
+  assert.equal(list.total_facts, 3);
+  assert.equal(store.facts.length, 4, 'nothing is deleted: the old fact stays for the semantic layer');
+});
+
+test('Ask never cites a recording that was split or joined away, even if the vector index still holds it', async () => {
+  const v = fakeVectors();
+  const { env, store } = fakeEnv({ recordings: [memRec({ id: 'm1' })] });
+  Object.assign(env, { AI: v.AI, VECTORS: v.VECTORS });
+  await withFetch(() => call('/api/recordings/m1/resummarize', { method: 'POST' }, env), llmJson({ summary: 'new', action_items: [], facts: FACTS_JSON }));
+  const ask = () => withFetch(async () => (await post('/api/ask', { question: 'who sends the contract' }, env)).json(), async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: 'ANSWER' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  assert.deepEqual((await ask()).sources.map((s) => s.title), ['Planning']);
+  store.recordings.find((r) => r.id === 'm1').hidden = 1; // the index is eventually consistent: its vectors are still there
+  const out = await ask();
+  assert.deepEqual(out.sources, []);
+});
+
+test("the daily brief is written from the computed open commitments, in the fixed sections, weighted to the last days", async () => {
+  const items = [{ task: 'Send the contract', owner: 'Jeff', due: '2026-11-05' }, { task: 'Review budget', owner: 'Ben', due: null }, { task: 'Book venue', owner: 'Jeff', due: '2026-11-11' }];
+  const { env } = fakeEnv({ recordings: [rec({ id: 'b1', status: 'ready', title: 'Planning', created_at: Date.parse('2026-11-09T10:00:00Z'), summary: 's', transcript: 't', speakers: '[]', action_items: JSON.stringify(items) })] });
+  const calls = [];
+  await withFetch(() => post('/api/today/brief', { kind: 'today', date: '2026-11-11', me: 'Jeff Eberhard' }, env), llmOk(calls));
+  const user = calls[0].messages[1].content;
+  assert.match(user, /authoritative/);
+  assert.match(user, /Overdue \(1\):\n- Send the contract \(Jeff\) due 2026-11-05/);
+  assert.match(user, /Due today \(1\):\n- Book venue/);
+  assert.match(user, /Waiting on others \(1\):\n- Review budget \(Ben\)/);
+  for (const h of ['## Do first', '## Due and overdue', '## Waiting on others', '## Decide today', '## People', '## Since yesterday']) assert.ok(user.includes(h), h);
 });

@@ -36,7 +36,7 @@ async function dropDerived(env, owner, id, vecChunks) {
 // `rec` is the row being processed, `buf` its audio bytes (null if too big to hold), `segments` and
 // `speakers` what transcription just produced. Returns null when nothing changes, else the new rows'
 // ids (the original is hidden). Never throws for a plan it cannot carry out: it just leaves things alone.
-export async function reshapeAfterTranscript(env, owner, rec, { segments, speakers, buf, tokensIn = 0, tokensOut = 0 }) {
+export async function reshapeAfterTranscript(env, owner, rec, { segments, speakers, buf, tokensIn = 0, tokensOut = 0, keepStatus = false }) {
   const opts = shapeOptions(env);
   if (!opts.enabled || !segments?.length) return null;
   const probe = buf && buf.byteLength <= MAX_AUDIO_BYTES ? probeAudio(buf) : null;
@@ -82,7 +82,9 @@ export async function reshapeAfterTranscript(env, owner, rec, { segments, speake
       ));
       stmts.push(env.DB.prepare('INSERT INTO transcript_fts (id, title, transcript) VALUES (?,?,?)').bind(ids[i], title, text));
     });
-    stmts.push(env.DB.prepare("UPDATE recordings SET hidden = 1, status = 'transcribed', status_at = ? WHERE id = ? AND owner = ?").bind(Date.now(), rec.id, owner));
+    stmts.push(keepStatus
+      ? env.DB.prepare('UPDATE recordings SET hidden = 1 WHERE id = ? AND owner = ?').bind(rec.id, owner)
+      : env.DB.prepare("UPDATE recordings SET hidden = 1, status = 'transcribed', status_at = ? WHERE id = ? AND owner = ?").bind(Date.now(), rec.id, owner));
     await env.DB.batch(stmts);
   } catch (e) {
     for (const k of written) await env.AUDIO.delete(k).catch(() => {});
@@ -218,11 +220,13 @@ async function undoCore(env, owner, id) {
   }
   let restored = [];
   for (const sid of sourceIds) {
-    const s = await env.DB.prepare('SELECT id, title, transcript, lineage FROM recordings WHERE id = ? AND owner = ?').bind(sid, owner).first();
+    const s = await env.DB.prepare('SELECT id, title, transcript, summary, status, lineage FROM recordings WHERE id = ? AND owner = ?').bind(sid, owner).first();
     if (!s) continue;
     // facts_at / vec_chunks back to empty: the memory catch-up re-extracts them for a summarized original.
     // After undoing a merge, src is cleared so the automatic merge does not put the pieces back together.
     await env.DB.prepare(`UPDATE recordings SET hidden = 0, facts_at = NULL, vec_chunks = 0${wasMerge ? ', src = NULL' : ''} WHERE id = ? AND owner = ?`).bind(sid, owner).run();
+    // (shaping used to leave a summarized original at 'transcribed', which reads as "Processing")
+    if (s.status === 'transcribed' && s.summary) await env.DB.prepare("UPDATE recordings SET status = 'ready' WHERE id = ? AND owner = ?").bind(sid, owner).run();
     if (s.transcript) {
       await env.DB.batch([
         env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(sid),

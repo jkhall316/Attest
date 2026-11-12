@@ -4,11 +4,12 @@
 import { json, fail } from '../http.js';
 import { areaClause, normalizeArea } from '../areas.js';
 import { VISIBLE } from '../conversations.js';
+import { isListedFact } from '../memory.js';
 import { defaultModel } from '../config.js';
 import { llmFetch } from '../llm.js';
 import { safeParse } from '../text.js';
 import {
-  DAY, AUTO_PROMPTS, validDate, weekStart, openItems, buildContext, insightSystem,
+  DAY, AUTO_PROMPTS, validDate, weekStart, openItems, buildContext, insightSystem, groundTruth, isMeName,
 } from '../insights.js';
 
 const MAX_PROMPT = 1500;
@@ -30,11 +31,13 @@ async function readyRows(env, owner, limit = 200, area = '') {
   ).bind(owner, ...ac.binds).all()).results || [];
   // Facts ride along so the model can read a few lines per recording instead of transcript.
   const facts = (await env.DB.prepare(
-    'SELECT recording_id, kind, person, text, quote, done FROM facts WHERE owner = ? ORDER BY created_at DESC LIMIT 800'
+    'SELECT recording_id, kind, person, text, quote, done, created_at FROM facts WHERE owner = ? ORDER BY created_at DESC LIMIT 800'
   ).bind(owner).all()).results || [];
   const byRec = new Map();
   const ids = new Set(rows.map((r) => r.id));
-  for (const f of facts) { if (!ids.has(f.recording_id)) continue; if (!byRec.has(f.recording_id)) byRec.set(f.recording_id, []); byRec.get(f.recording_id).push(f); }
+  const now = Date.now();
+  // facts about unnamed speakers older than a week are not highlighted (they stay stored and searchable)
+  for (const f of facts) { if (!ids.has(f.recording_id) || !isListedFact(f, now)) continue; if (!byRec.has(f.recording_id)) byRec.set(f.recording_id, []); byRec.get(f.recording_id).push(f); }
   return rows.map((r) => ({
     ...r,
     facts: byRec.get(r.id) || [],
@@ -55,7 +58,7 @@ async function cachedBrief(env, owner, kind, period) {
 
 // The shared engine: a time window of the owner's recordings + one instruction -> markdown.
 // No recordings in the window means no model call (and nothing to cache).
-export async function runInsight(env, owner, { prompt, person, days, date, me, deep, handled, area }) {
+export async function runInsight(env, owner, { prompt, person, days, date, me, deep, handled, area, ground }) {
   const since = Date.now() - days * DAY;
   const rows = await readyRows(env, owner, deep ? 120 : 80, area);
   const { text, sources } = buildContext(rows, { since, person, deep, question: prompt });
@@ -71,7 +74,7 @@ export async function runInsight(env, owner, { prompt, person, days, date, me, d
     model: defaultModel(env),
     messages: [
       { role: 'system', content: insightSystem({ today: date, me, personNotes, handled }) },
-      { role: 'user', content: `${text}\n\n${person ? `Focus on: ${person}\n` : ''}Request: ${prompt}` },
+      { role: 'user', content: `${text}\n\n${ground ? groundTruth(openItems(rows, date), date, me, isMeName) + '\n\n' : ''}${person ? `Focus on: ${person}\n` : ''}Request: ${prompt}` },
     ],
   });
   if (!res.ok) throw new Error(`insight ${res.status}: ${(await res.text()).slice(0, 300)}`);

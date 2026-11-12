@@ -910,3 +910,26 @@ test('a recording made by shaping says so and offers undo; a hidden original off
   render({ ...base, segments: [{ speaker: 'A', text: 'hi', start: 0, end: 1 }, { speaker: 'B', text: 'yo', start: 1, end: 2 }] });
   assert.match(elements.get('main').innerHTML, /id="reshape"/);
 });
+
+test('reminders: the browser and the server put every open item in the same bucket', async () => {
+  const client = await import('../public/app/reminders.js');
+  const server = await import('../src/insights.js');
+  const today = '2026-11-11';
+  const items = [
+    { due: '2026-11-01', overdue: true }, { due: '2026-11-11' }, { due: '2026-11-15' }, { due: '2026-12-30' },
+    { due: null, slipping: true }, { due: null }, { due: 'Friday', slipping: true },
+  ];
+  for (const x of items) for (const mine of [true, false]) assert.equal(client.reminderBucket(x, today, mine), server.reminderBucket(x, today, mine));
+  assert.deepEqual(items.map((x) => client.reminderBucket(x, today)), ['overdue', 'today', 'week', 'later', 'slipping', 'open', 'slipping']);
+  assert.deepEqual(client.BUCKETS, server.BUCKETS);
+  const g = client.groupReminders([{ owner: 'Ben', due: null }, { owner: 'Jeff', due: '2026-11-11' }], today, (x) => x.owner === 'Jeff');
+  assert.deepEqual([...g.keys()].sort(), ['today', 'waiting']);
+});
+
+test('a brief that opens with only a title does not render an empty card', async () => {
+  const { noteHtml } = await import('../public/app/recordings.js');
+  const html = noteHtml("# Jeff's Today's Brief (2026-11-11)\n\n## Do first\n- **Send** the deck\n\n## Due and overdue\n- **Budget** by Friday");
+  assert.doesNotMatch(html, /Today's Brief/);
+  assert.equal((html.match(/<details/g) || []).length, 2);
+  assert.match(html, /Do first/);
+});

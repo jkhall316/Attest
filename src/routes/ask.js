@@ -26,11 +26,13 @@ export async function retrieve(env, owner, question, area = '') {
   if (vectorsEnabled(env)) {
     try {
       semantic = chunksToHits(await semanticChunks(env, owner, question));
-      // The index knows nothing about areas, so keep only hits whose recording is in the chosen one.
-      if (inArea && semantic.length) {
+      // The index knows nothing about areas, and it is eventually consistent, so a recording that was
+      // just split, joined or deleted can still turn up. Keep only hits that are visible (and in the
+      // chosen area).
+      if (semantic.length) {
         const ok = new Set(((await env.DB.prepare(
-          `SELECT id FROM recordings WHERE owner = ? AND area = ? AND id IN (${semantic.map(() => '?').join(',')})`
-        ).bind(owner, inArea, ...semantic.map((h) => h.id)).all()).results || []).map((r) => r.id));
+          `SELECT id FROM recordings WHERE owner = ? AND hidden = 0${inArea ? ' AND area = ?' : ''} AND id IN (${semantic.map(() => '?').join(',')})`
+        ).bind(owner, ...(inArea ? [inArea] : []), ...semantic.map((h) => h.id)).all()).results || []).map((r) => r.id));
         semantic = semantic.filter((h) => ok.has(h.id));
       }
     }

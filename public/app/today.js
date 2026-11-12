@@ -1,6 +1,7 @@
 // The Today screen (home): auto briefs, open action items, and the prefilled prompt box.
 
 import { getArea, areaQuery } from './scope.js';
+import { BUCKETS, groupReminders } from './reminders.js';
 import { $, esc, md } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -154,19 +155,26 @@ export async function showToday(opts) {
       <label class="muted" style="display:flex;align-items:center;gap:6px" title="Write today's brief and the weekly review automatically when you open Attest. Each costs one small model call.">
         <input type="checkbox" id="auto-on" ${autoOn() ? 'checked' : ''}> Write briefs automatically</label>
     </div>
-    ${omnibarHtml(d.people)}
     ${d.has_recordings ? '' : '<div class="empty">Record or upload something and your day will start to fill in here.</div>'}
-    <div class="row" style="justify-content:space-between"><h3>Today's brief</h3><button id="brief-refresh" class="small">Refresh</button></div>
-    <div class="card-box" id="brief-card">${briefHtml(d.brief, d.has_recordings ? 'Generating…' : 'Nothing to brief yet.')}</div>
-    <div class="row" style="justify-content:space-between;align-items:flex-end">
-      <h3>Open action items (${d.open_count})${d.overdue_count ? ` · <span style="color:var(--bad)">${d.overdue_count} overdue</span>` : ''}${d.slipping_count ? ` · ${d.slipping_count} slipping` : ''}</h3>
-      <div class="row" id="items-filter"></div>
+    <div class="today-grid">
+      <div class="today-main">
+        <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Today's brief</h3><button id="brief-refresh" class="small">Refresh</button></div>
+        <div id="today-stats" class="stats"></div>
+        <div class="card-box brief-hero" id="brief-card">${briefHtml(d.brief, d.has_recordings ? 'Generating…' : 'Nothing to brief yet.')}</div>
+        ${omnibarHtml(d.people)}
+        <details style="margin-top:20px" ${d.weekly ? 'open' : ''}><summary><b>Weekly review</b> <span class="muted">(week of ${esc(d.week_start)})</span></summary>
+          <div class="card-box brief-hero" id="weekly-card" style="margin-top:8px">${briefHtml(d.weekly, d.has_recordings ? 'Generating…' : 'Nothing to review yet.')}</div>
+          <button id="weekly-refresh" class="small" style="margin-top:6px">Refresh</button>
+        </details>
+      </div>
+      <div class="today-side">
+        <div class="row" style="justify-content:space-between;align-items:flex-end">
+          <h3 style="margin:0">Needs you <span class="muted" style="font-weight:400">(${d.open_count})</span></h3>
+          <div class="row" id="items-filter"></div>
+        </div>
+        <div id="open-items" class="list reminders"></div>
+      </div>
     </div>
-    <div id="open-items" class="list"></div>
-    <details style="margin-top:20px" ${d.weekly ? 'open' : ''}><summary><b>Weekly review</b> <span class="muted">(week of ${esc(d.week_start)})</span></summary>
-      <div class="card-box" id="weekly-card" style="margin-top:8px">${briefHtml(d.weekly, d.has_recordings ? 'Generating…' : 'Nothing to review yet.')}</div>
-      <button id="weekly-refresh" class="small" style="margin-top:6px">Refresh</button>
-    </details>
     <h3>Prompts for your day</h3>
     <div class="muted" style="margin-bottom:8px">One-click prompts over your recent recordings. Pick a person and a time window, choose a prompt, edit it if you like, then Run.</div>
     <div class="row"><select id="p-person">${personOpts}</select>
@@ -181,6 +189,7 @@ export async function showToday(opts) {
     <div id="people-list" class="list"><div class="muted" style="padding:12px 0">Loading…</div></div>
     <h3>Memory</h3>
     <div class="muted" id="mem-status">Loading…</div>
+    <div class="muted" style="font-size:12px;margin-top:2px">Facts about someone Attest could not name stay here for a week so you can tag the speaker. After that they leave this list but stay searchable in Ask.</div>
     <div class="row" style="margin:8px 0"><select id="mem-kind"><option value="">All kinds</option></select>
       <select id="mem-person"><option value="">Anyone</option></select>
       <button id="mem-build" class="small" hidden></button></div>
@@ -425,8 +434,19 @@ export function renderOpenItems() {
     const b = e.target.closest('[data-mode]');
     if (b) { store.set('items', b.dataset.mode); renderOpenItems(); }
   };
-  box.innerHTML = shown.map(itemRow).join('')
+  // Group by what needs doing when. With a name set, the "Everyone" view puts other people's items under
+  // "Waiting on others" instead of mixing them in with yours.
+  const today = localDate();
+  const mineOf = (x) => !me || !x.owner || isMe(x.owner, me);
+  const groups = groupReminders(shown, today, mineOf);
+  box.innerHTML = BUCKETS.filter(([k]) => groups.get(k)?.length).map(([k, label]) =>
+    `<div class="bucket bucket-${k}"><div class="bucket-h">${esc(label)} <span class="muted">${groups.get(k).length}</span></div>${groups.get(k).map(itemRow).join('')}</div>`).join('')
     || `<div class="muted" style="padding:12px 0">${mode === 'mine' ? 'Nothing assigned to you.' : 'Nothing open. Action items from your recordings show up here.'}</div>`;
+  // The at-a-glance row above the brief
+  const all = groupReminders(openData, today, mineOf);
+  const chip = (k, label, cls) => (all.get(k)?.length ? `<span class="stat ${cls}"><b>${all.get(k).length}</b> ${label}</span>` : '');
+  const stats = $('today-stats');
+  if (stats) stats.innerHTML = chip('overdue', 'overdue', 'bad') + chip('today', 'due today', 'warn') + chip('week', 'this week', '') + chip('slipping', 'slipping', 'warn') + chip('waiting', 'waiting on others', '');
 }
 
 /* ---- people: see everyone, merge duplicates ---- */
