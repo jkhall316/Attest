@@ -619,9 +619,17 @@ export async function setActionDone(request, env, owner, id) {
   const rec = await readRow(env, id, owner);
   if (!rec) return fail('not found', 404);
   const items = Array.isArray(rec.action_items) ? rec.action_items : [];
-  if (!body || !Number.isInteger(body.i) || body.i < 0 || body.i >= items.length || typeof body.done !== 'boolean')
-    return fail('i and done required');
-  const next = items.map((a, k) => (k === body.i ? { ...a, done: body.done } : a));
+  if (!body || typeof body.done !== 'boolean') return fail('done (true or false) is required');
+  // A page can be open while a recording is re-summarized, which rewrites its action list. When the
+  // page says which task it means, find that task (the same position if it still matches, else the
+  // first one worded the same) instead of trusting a position that may now be a different task.
+  const same = (a, t) => String(a?.task || '').trim().toLowerCase() === String(t).trim().toLowerCase();
+  let at = Number.isInteger(body.i) && body.i >= 0 && body.i < items.length ? body.i : -1;
+  if (typeof body.task === 'string' && body.task.trim()) {
+    if (at < 0 || !same(items[at], body.task)) at = items.findIndex((a) => same(a, body.task));
+    if (at < 0) return fail('that to-do has changed since this page loaded; refresh to see the current list', 409);
+  } else if (at < 0) return fail('which action item? (i) is required');
+  const next = items.map((a, k) => (k === at ? { ...a, done: body.done } : a));
   await env.DB.prepare('UPDATE recordings SET action_items = ? WHERE id = ? AND owner = ?')
     .bind(JSON.stringify(next), id, owner).run();
   return json({ ok: true, done: body.done });

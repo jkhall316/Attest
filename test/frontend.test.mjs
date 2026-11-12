@@ -933,3 +933,11 @@ test('a brief that opens with only a title does not render an empty card', async
   assert.equal((html.match(/<details/g) || []).length, 2);
   assert.match(html, /Do first/);
 });
+
+test('a to-do row carries its task text, so a check-off survives the list being rewritten', async () => {
+  const { personRow } = await import('../public/app/today.js'); // proves the module still loads
+  assert.equal(typeof personRow, 'function');
+  const src = await (await import('node:fs/promises')).readFile(new URL('../public/app/today.js', import.meta.url), 'utf8');
+  assert.match(src, /data-task="\$\{esc\(x\.task\)\}"/);
+  assert.match(src, /task: row\.dataset\.task/);
+});
