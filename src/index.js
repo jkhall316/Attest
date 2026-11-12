@@ -29,7 +29,7 @@ import {
   upload, process as processRecording, audio, remove, voiceMatch, resummarize, setActionDone, speakerTurns, resetSpeakers, reassign,
   liveStart, liveChunk, liveAudio, livePart, liveRecover, setArea, backfillAreas, reshapeNow,
 } from './routes/recordings.js';
-import { listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
+import { cleanPlaceholderSpeakers, listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
 import { today, brief, ackBrief, insight } from './routes/today.js';
 import { backfill, listMemory, patchFact, deleteFact } from './routes/memory.js';
 import { vectorsEnabled } from './vectors.js';
@@ -147,6 +147,8 @@ export default {
 
       if (pathname.startsWith('/api/templates/') && m === 'DELETE')
         return deleteTemplate(env, owner, pathname.slice('/api/templates/'.length));
+
+      if (pathname === '/api/speakers/clean-placeholders' && m === 'POST') return cleanPlaceholderSpeakers(env, owner);
 
       if (pathname === '/api/people' && m === 'GET') return listPeople(env, owner, new URL(request.url).searchParams.get('area'));
 

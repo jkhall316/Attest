@@ -154,3 +154,7 @@ export function appendLive(prev, next) {
   return joined.length > 20000 ? joined.slice(-20000) : joined;
 }
 /* --- /#7 live transcription --- */
+
+// "Speaker 0", "Speaker K", "SPEAKER_01", "Unknown", "User 2": labels a transcriber or app gives to
+// someone it could not name. They are placeholders, never a person's name.
+export const isPlaceholderName = (n) => /^\s*(speaker|spk|unknown|user)[\s_-]*(\d{1,3}|[a-z])?\s*$/i.test(String(n ?? ''));

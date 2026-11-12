@@ -833,3 +833,14 @@ test('isListedFact: named people always, unnamed only for a week after the recor
   assert.equal(isListedFact({ person: null, created_at: now - UNTAGGED_LISTED_MS - 1000 }, now), false);
   assert.equal(isListedFact({ person: '', created_at: now - 30 * 86400000 }, now), false);
 });
+
+import { isPlaceholderName } from '../src/text.js';
+test('isPlaceholderName: placeholders with a digit or a single letter, never real names', () => {
+  for (const n of ['Speaker 0', 'Speaker K', 'speaker_01', 'SPEAKER J', 'Unknown', 'Unknown 3', 'User 2', 'spk b', ' Speaker  ']) assert.equal(isPlaceholderName(n), true, n);
+  for (const n of ['Jeff', 'Jeff Eberhard', 'Speaker Smith', 'Kate', 'Use', '', null, undefined]) assert.equal(isPlaceholderName(n), false, String(n));
+});
+test('a placeholder name never shows up as a speaker: it becomes Unknown N', () => {
+  const segs = [{ speaker: 'A', text: 'hi' }, { speaker: 'B', text: 'yo' }, { speaker: 'C', text: 'hey' }];
+  const out = applySpeakerNames(segs, [{ label: 'A', name: 'Speaker K' }, { label: 'B', name: 'Jeff' }, { label: 'C', name: 'Speaker 4' }]);
+  assert.deepEqual(out.map((s) => s.speaker), ['Unknown 1', 'Jeff', 'Unknown 2']);
+});

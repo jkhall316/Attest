@@ -7,7 +7,7 @@ import { areaClause } from '../areas.js';
 import { readRow } from '../db.js';
 import { rebuildTranscript } from '../speakers.js';
 import { suggestMerges, renameSpeaker, mergeAliases } from '../people.js';
-import { safeParse } from '../text.js';
+import { safeParse, isPlaceholderName } from '../text.js';
 import { VOICE_MODEL } from '../config.js';
 import { normalizeEmbedding, MIN_VOICEPRINT_MS, MAX_VOICEPRINT_MS, MAX_VOICEPRINT_BYTES, wavDurationMs } from '../voiceprints.js';
 
@@ -277,4 +277,32 @@ export async function mergePeople(request, env, owner) {
   // D1 batches are atomic; keep each under a safe size by splitting on recording boundaries.
   for (let i = 0; i < stmts.length; i += 90) await env.DB.batch(stmts.slice(i, i + 90));
   return json({ ok: true, into: { id: into.id, name: into.name }, recordings_updated: renamed });
+}
+
+// POST /api/speakers/clean-placeholders: older imports saved "Speaker K" and the like as if they were
+// names. Sets those back to unnamed (Unknown N), rebuilds the transcript and search text, and clears the
+// semantic-index marker so the background catch-up re-indexes them. A name a person confirmed is never
+// touched. Returns the recordings that were ready, because their summaries still carry the old labels:
+// re-summarize those.
+export async function cleanPlaceholderSpeakers(env, owner) {
+  const recs = (await env.DB.prepare('SELECT id, title, status, hidden, speakers, segments, transcript FROM recordings WHERE owner = ?').bind(owner).all()).results || [];
+  const stmts = [];
+  const resummarize = [];
+  let fixed = 0;
+  for (const r of recs) {
+    const speakers = safeParse(r.speakers) || [];
+    if (!speakers.some((s) => s?.name && !s.confirmed && isPlaceholderName(s.name))) continue;
+    const next = speakers.map((s) => (s?.name && !s.confirmed && isPlaceholderName(s.name) ? { ...s, name: null, evidence: '' } : s));
+    const segments = safeParse(r.segments);
+    const transcript = Array.isArray(segments) && segments.length ? rebuildTranscript(segments, next, r.transcript) : r.transcript;
+    stmts.push(
+      env.DB.prepare('UPDATE recordings SET speakers = ?, transcript = ?, vec_chunks = NULL WHERE id = ? AND owner = ?').bind(JSON.stringify(next), transcript, r.id, owner),
+      env.DB.prepare('DELETE FROM transcript_fts WHERE id = ?').bind(r.id),
+    );
+    if (!r.hidden) stmts.push(env.DB.prepare('INSERT INTO transcript_fts (id, title, transcript) VALUES (?,?,?)').bind(r.id, r.title, transcript));
+    fixed++;
+    if (r.status === 'ready' && !r.hidden) resummarize.push(r.id);
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return json({ fixed, resummarize });
 }

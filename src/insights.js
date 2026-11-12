@@ -3,6 +3,7 @@
 // routes/today.js.
 
 import { applySpeakerNames } from './speakers.js';
+import { isPlaceholderName } from './text.js';
 import { excerpt } from './routes/ask.js';
 
 export const DAY = 86400000;
@@ -102,7 +103,7 @@ export function buildContext(rows, { since, person, deep = false, question = '' 
     .slice(0, cap);
   const per = Math.max(800, Math.min(3500, Math.floor(budget / Math.max(1, picked.length))));
   const text = picked.map((r) => {
-    const names = (Array.isArray(r.speakers) ? r.speakers : []).map((s) => s.name || 'Unknown').join(', ');
+    const names = (Array.isArray(r.speakers) ? r.speakers : []).map((s) => (s.name && !isPlaceholderName(s.name) ? s.name : 'Unknown')).join(', ');
     const open = (Array.isArray(r.action_items) ? r.action_items : []).filter((a) => a && !a.done && a.task)
       .map((a) => `- ${a.task}${a.owner || a.due ? ` (${[a.owner, a.due].filter(Boolean).join(', ')})` : ''}`).join('\n');
     const facts = (r.facts || []).slice(0, 15)
@@ -202,6 +203,18 @@ export const AUTO_PROMPTS = {
   },
   weekly: {
     days: 7,
-    prompt: 'Weekly review of the recordings in this window: the main themes, the decisions made, the questions still unresolved, and the one thing to focus on next week. Keep it under 300 words.',
+    ground: true,
+    prompt: [
+      'Write my weekly review, as a chief of staff would at the end of the week.',
+      'Use exactly these markdown sections, in this order, and leave out any section with nothing real in it:',
+      '## The week in one line: one sentence on what this week was really about.',
+      '## Decisions made: each decision, who made it, and why, one line each.',
+      '## Still open: commitments carried into next week, oldest or most overdue first, with who owns each.',
+      '## Unresolved questions: questions asked that never got a clear answer.',
+      '## People: who I spent the week with and anyone I owe a follow-up.',
+      '## Focus next week: the one thing to focus on and the two that come after it, each with the reason.',
+      'Each bullet starts with the bold key noun or name, then one plain sentence, then the recording and date in parentheses.',
+      'Under 450 words. Where something is not in the recordings, say nothing rather than guess.',
+    ].join('\n'),
   },
 };

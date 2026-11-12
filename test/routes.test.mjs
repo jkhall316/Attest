@@ -2042,3 +2042,30 @@ test("the daily brief is written from the computed open commitments, in the fixe
   assert.match(user, /Waiting on others \(1\):\n- Review budget \(Ben\)/);
   for (const h of ['## Do first', '## Due and overdue', '## Waiting on others', '## Decide today', '## People', '## Since yesterday']) assert.ok(user.includes(h), h);
 });
+
+test('POST /api/speakers/clean-placeholders un-names "Speaker K", keeps real and confirmed names, and lists what to re-summarize', async () => {
+  const segs = JSON.stringify([{ speaker: 'A', text: 'hello', start: 0, end: 2 }, { speaker: 'B', text: 'hi', start: 2, end: 3 }, { speaker: 'C', text: 'yo', start: 3, end: 4 }]);
+  const mk = (id, owner, speakers, o = {}) => rec({ id, owner, status: 'ready', segments: segs, transcript: 'old', speakers: JSON.stringify(speakers), ...o });
+  const { env, store } = fakeEnv({ recordings: [
+    mk('x1', ME, [{ label: 'A', name: 'Speaker K', confirmed: false }, { label: 'B', name: 'Jeff', confirmed: true }, { label: 'C', name: 'Speaker 3', confirmed: true }]),
+    mk('x2', ME, [{ label: 'A', name: 'Ben', confirmed: false }]),
+    mk('x3', OTHER, [{ label: 'A', name: 'Speaker K', confirmed: false }], { owner: OTHER }),
+    mk('x4', ME, [{ label: 'A', name: 'Speaker L', confirmed: false }], { status: 'transcribed' }),
+  ] });
+  const out = await (await post('/api/speakers/clean-placeholders', {}, env)).json();
+  assert.equal(out.fixed, 2);
+  assert.deepEqual(out.resummarize, ['x1']);
+  const x1 = store.recordings.find((r) => r.id === 'x1');
+  assert.deepEqual(JSON.parse(x1.speakers).map((s) => s.name), [null, 'Jeff', 'Speaker 3']); // a confirmed name stays, even a placeholder-looking one
+  assert.match(x1.transcript, /^Unknown 1: hello/);
+  assert.equal(store.recordings.find((r) => r.id === 'x3').speakers.includes('Speaker K'), true, 'another owner is untouched');
+});
+
+test('the weekly review is written in fixed sections from the computed open commitments', async () => {
+  const { env } = fakeEnv({ recordings: [rec({ id: 'w1', status: 'ready', title: 'Sync', created_at: Date.parse('2026-11-09T10:00:00Z'), summary: 's', transcript: 't', speakers: '[]', action_items: JSON.stringify([{ task: 'Ship it', owner: 'Jeff', due: '2026-11-05' }]) })] });
+  const calls = [];
+  await withFetch(() => post('/api/today/brief', { kind: 'weekly', date: '2026-11-11', me: 'Jeff' }, env), llmOk(calls));
+  const user = calls[0].messages[1].content;
+  assert.match(user, /Overdue \(1\)/);
+  for (const h of ['## The week in one line', '## Decisions made', '## Still open', '## Unresolved questions', '## People', '## Focus next week']) assert.ok(user.includes(h), h);
+});

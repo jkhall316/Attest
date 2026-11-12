@@ -8,6 +8,7 @@
 
 import { json, fail, uid } from '../http.js';
 import { anonymousSpeakers, rebuildTranscript } from '../speakers.js';
+import { isPlaceholderName } from '../text.js';
 
 const BASE = 'https://api.omi.me/v1/dev/user';
 const BATCH = 3;      // conversations fetched with transcripts per call; the client calls again while `remaining` > 0
@@ -26,8 +27,7 @@ function checkStatus(r, what) {
   if (!r.ok) throw bad(`omi ${what} ${r.status}`, 502);
 }
 
-// "Speaker 0" / "SPEAKER_01" are placeholders, not names.
-const PLACEHOLDER = /^\s*(speaker|spk|unknown|user)[\s_-]*\d*\s*$/i;
+// "Speaker 0", "Speaker K" and "SPEAKER_01" are placeholders, not names (see isPlaceholderName).
 
 // Pure. Omi conversation (with transcript_segments) -> the columns an Attest row needs, or null
 // when there is nothing to summarize. Speakers become A, B, C... in order of first appearance.
@@ -45,7 +45,7 @@ export function omiToRow(conv) {
     const k = key(s);
     if (!order.includes(k)) order.push(k);
     const n = String(s.speaker_name || '').trim();
-    if (n && !PLACEHOLDER.test(n) && !names.has(k)) names.set(k, n.slice(0, 80));
+    if (n && !isPlaceholderName(n) && !names.has(k)) names.set(k, n.slice(0, 80));
   }
   const label = (k) => LABELS[Math.min(order.indexOf(k), LABELS.length - 1)];
   const segments = raw.map((s) => ({ speaker: label(key(s)), text: String(s.text).trim(), start: s.start, end: s.end }));

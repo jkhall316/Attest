@@ -8,7 +8,7 @@
 // confidently wrong every time -- that is why every name is checked against a
 // verbatim quote from the transcript before it is trusted.
 
-import { parseJsonLoose, diarizeToText } from './text.js';
+import { parseJsonLoose, diarizeToText, isPlaceholderName } from './text.js';
 import { defaultModel, contextChars } from './config.js';
 import { llmFetch } from './llm.js';
 
@@ -150,7 +150,7 @@ export function applySpeakerNames(segments, speakers) {
   return (segments || []).map((seg) => {
     const label = seg.speaker || 'Speaker';
     const name = byLabel.get(label)?.name;
-    if (name) return { ...seg, speaker: name };
+    if (name && !isPlaceholderName(name)) return { ...seg, speaker: name };
     if (!unknownNumbers.has(label)) unknownNumbers.set(label, nextUnknown++);
     return { ...seg, speaker: `Unknown ${unknownNumbers.get(label)}` };
   });
