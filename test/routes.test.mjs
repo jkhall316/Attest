@@ -2069,3 +2069,18 @@ test('the weekly review is written in fixed sections from the computed open comm
   assert.match(user, /Overdue \(1\)/);
   for (const h of ['## The week in one line', '## Decisions made', '## Still open', '## Unresolved questions', '## People', '## Focus next week']) assert.ok(user.includes(h), h);
 });
+
+test('checking off a to-do from a stale page ticks the task it meant, never whatever sits at that position now', async () => {
+  const items = [{ task: 'Alpha', owner: 'Jeff', done: false }, { task: 'Beta', owner: 'Jeff', done: false }, { task: 'Gamma', owner: 'Jeff', done: false }];
+  const { env, store } = fakeEnv({ recordings: [rec({ id: 'a', status: 'ready', action_items: JSON.stringify(items) })] });
+  const patch = (body) => call('/api/recordings/a/actions', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env);
+  const done = () => JSON.parse(store.recordings[0].action_items).map((a) => !!a.done);
+  assert.equal((await patch({ i: 0, task: 'Gamma', done: true })).status, 200); // position moved: found by its words
+  assert.deepEqual(done(), [false, false, true]);
+  assert.equal((await patch({ i: 7, task: ' beta ', done: true })).status, 200); // position gone entirely
+  assert.deepEqual(done(), [false, true, true]);
+  const gone = await patch({ i: 1, task: 'Deleted task', done: true });
+  assert.equal(gone.status, 409);
+  assert.match((await gone.json()).error, /refresh/);
+  assert.deepEqual(done(), [false, true, true], 'nothing was ticked');
+});

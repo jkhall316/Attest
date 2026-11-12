@@ -46,7 +46,7 @@ function itemRow(x) {
   const who = x.owner ? `<span class="tag who">${icon('user', 12)} ${esc(x.owner)}</span>` : '';
   const due = x.due ? `<span class="tag due${x.overdue ? ' late' : ''}">${icon('calendar', 12)} ${esc(x.due)}${x.overdue ? ' · overdue' : ''}</span>` : '';
   const age = x.slipping ? `<span class="tag age">open ${x.age_days}d</span>` : '';
-  return `<label class="task" data-rec="${esc(x.rec_id)}" data-i="${x.i}">
+  return `<label class="task" data-rec="${esc(x.rec_id)}" data-i="${x.i}" data-task="${esc(x.task)}">
     <input type="checkbox">
     <span class="body">${esc(x.task)}
       <span class="meta">${who}${due}${age}<a href="#" class="open-rec" title="${esc(x.title)}">${esc(x.title)}</a></span></span></label>`;
@@ -281,11 +281,16 @@ function wire(d, mine, date) {
     try {
       await api(`/recordings/${row.dataset.rec}/actions`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ i: Number(row.dataset.i), done: box.checked }),
+        body: JSON.stringify({ i: Number(row.dataset.i), task: row.dataset.task, done: box.checked }),
       });
       row.classList.toggle('done', box.checked);
       loadBadge();
-    } catch (err) { box.checked = !box.checked; alert(err.message); }
+    } catch (err) {
+      box.checked = !box.checked;
+      // the list changed underneath this page (a recording was re-summarized): show the current one
+      if (/changed since this page loaded/.test(err.message)) { showToday(); return; }
+      alert(err.message);
+    }
   };
 
   const setPrompt = (p) => {
