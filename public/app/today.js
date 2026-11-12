@@ -1,5 +1,6 @@
 // The Today screen (home): auto briefs, open action items, and the prefilled prompt box.
 
+import { getArea, areaQuery } from './scope.js';
 import { $, esc, md } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -34,7 +35,7 @@ export function badgeText(d) {
 // Count on the sidebar Today button. Best effort.
 export async function loadBadge() {
   try {
-    const d = await api('/today?date=' + localDate());
+    const d = await api('/today?date=' + localDate() + areaQuery('&'));
     if ($('badge')) $('badge').textContent = badgeText(d);
     return d;
   } catch { return null; }
@@ -128,7 +129,7 @@ export async function showToday(opts) {
   const date = localDate();
   $('main').innerHTML = '<div class="muted">Loading Today…</div>';
   let d;
-  try { d = await api('/today?date=' + date); } catch (e) {
+  try { d = await api('/today?date=' + date + areaQuery('&')); } catch (e) {
     $('main').innerHTML = `<div class="banner">${esc(e.message)}</div>`; return;
   }
   if (mine !== token) return;
@@ -243,7 +244,7 @@ function wireOmnibar(date, mine) {
     $('t-ask-go').disabled = true;
     out.innerHTML = `<div class="muted">${deep ? 'Researching…' : 'Thinking…'}</div>`;
     try {
-      const r = await post('/insight', { prompt: q, person, days: Number(days) || 60, date, me: getMe(), deep });
+      const r = await post('/insight', { prompt: q, person, days: Number(days) || 60, date, area: getArea() || undefined, me: getMe(), deep });
       if (mine !== token) return;
       out.innerHTML = `<div class="panel"><div class="md">${md(r.answer)}</div></div>` +
         (r.sources?.length ? `<div class="muted" style="margin-top:8px">From: ${r.sources.map((x) => esc(x.title)).join(' · ')}</div>` : '');
@@ -301,7 +302,7 @@ async function runPrompt(date, mine) {
   $('p-run').disabled = true; $('p-status').textContent = 'Thinking…'; $('p-out').innerHTML = '';
   try {
     const out = await post('/insight', {
-      prompt: text, person, days: Number($('p-days').value), date, me: getMe(), deep: $('p-text').dataset.deep === '1',
+      prompt: text, person, days: Number($('p-days').value), date, area: getArea() || undefined, me: getMe(), deep: $('p-text').dataset.deep === '1',
     });
     if (mine !== token) return;
     $('p-out').innerHTML = `<div class="panel"><div class="md">${md(out.answer)}</div></div>` +
@@ -318,7 +319,7 @@ async function generate(kind, date, mine, force = false) {
   if (!card) return;
   card.innerHTML = '<div class="muted">Generating…</div>';
   try {
-    const b = await post('/today/brief', { kind, date, me: getMe(), force });
+    const b = await post('/today/brief', { kind, date, area: getArea() || undefined, me: getMe(), force });
     if (mine === token) { card.innerHTML = briefHtml(b, 'Nothing to show.'); decorateBrief(card.id || (kind === 'today' ? 'brief-card' : 'weekly-card')); }
   } catch (e) {
     if (mine === token) card.innerHTML = `<div class="muted">Could not generate: ${esc(e.message)}</div>`;
@@ -354,7 +355,7 @@ async function loadMemory(mine) {
   if (!$('mem-list')) return;
   const kind = $('mem-kind').value, person = $('mem-person').value;
   let m;
-  try { m = await api('/memory?' + new URLSearchParams({ kind, person })); } catch (e) {
+  try { m = await api('/memory?' + new URLSearchParams({ kind, person, area: getArea() })); } catch (e) {
     if (mine === token) $('mem-status').textContent = 'Could not load memory: ' + e.message; return;
   }
   if (mine !== token) return;
@@ -482,7 +483,7 @@ function startRename(row, mine) {
 async function loadPeople(mine, keepNotice = false) {
   if (!$('people-list')) return;
   let out;
-  try { out = await api('/people'); } catch (e) { if (mine === token) $('people-list').innerHTML = `<div class="muted" style="padding:12px 0">Could not load people: ${esc(e.message)}</div>`; return; }
+  try { out = await api('/people' + areaQuery()); } catch (e) { if (mine === token) $('people-list').innerHTML = `<div class="muted" style="padding:12px 0">Could not load people: ${esc(e.message)}</div>`; return; }
   if (mine !== token) return;
   const { people = [], suggestions = [] } = out;
   if (!keepNotice) {

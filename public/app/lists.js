@@ -4,6 +4,7 @@
 import { $, esc } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
+import { areaLabel, getArea, areaQuery } from './scope.js';
 import { groupByDate, fmtDuration, STATUS_LABEL, initials, avatarStyle } from './format.js';
 
 export const avatarCluster = (names) => {
@@ -17,7 +18,7 @@ export function recordingCard(r, activeId) {
   return `<div class="card ${r.id === activeId ? 'active' : ''}" data-id="${r.id}" ${r.error ? `title="${esc(r.error)}"` : ''}>
     <div class="t">${esc(r.title)}</div>
     <div class="rmeta">${avatarCluster(r.people)}${dur ? `<span title="Duration">${dur}</span>` : ''}
-      <span>${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><span class="sp"></span>
+      <span>${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>${r.area && !getArea() && r.area !== 'work' ? `<span class="pill" title="Area">${areaLabel(r.area)}</span>` : ''}<span class="sp"></span>
       <span class="pill ${r.status}">${STATUS_LABEL[r.status] || esc(r.status)}</span></div>
   </div>`;
 }
@@ -26,7 +27,7 @@ export async function refresh() {
   const onRecording = Boolean(state.current);
   $('home')?.classList.toggle('active', !onRecording && state.screen === 'today');
   $('nav-ask')?.classList.toggle('active', !onRecording && state.screen === 'ask');
-  const { recordings } = await api('/recordings');
+  const { recordings } = await api('/recordings' + areaQuery());
   $('count').textContent = recordings.length ? `(${recordings.length})` : '';
   $('list').innerHTML = groupByDate(recordings).map((g) =>
     `<div class="group-title">${g.label}</div>${g.items.map((r) => recordingCard(r, state.current)).join('')}`).join('')

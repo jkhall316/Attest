@@ -3,6 +3,7 @@
 // human actually vouched for. That PATCH is the only path that sets confirmed:true.
 
 import { json, fail, uid } from '../http.js';
+import { areaClause } from '../areas.js';
 import { readRow } from '../db.js';
 import { rebuildTranscript } from '../speakers.js';
 import { suggestMerges, renameSpeaker, mergeAliases } from '../people.js';
@@ -10,7 +11,7 @@ import { safeParse } from '../text.js';
 import { VOICE_MODEL } from '../config.js';
 import { normalizeEmbedding, MIN_VOICEPRINT_MS, MAX_VOICEPRINT_MS, MAX_VOICEPRINT_BYTES, wavDurationMs } from '../voiceprints.js';
 
-export async function listPeople(env, owner) {
+export async function listPeople(env, owner, area = '') {
   // voiceprint_count (#14) is a plain LEFT JOIN count, not selectVoiceprints() --
   // this is "how many clips does this person have", not "which clips go on the wire".
   const rows = (await env.DB.prepare(
@@ -23,7 +24,8 @@ export async function listPeople(env, owner) {
       ORDER BY people.name`
   ).bind(owner).all()).results;
   // How many recordings each person is named in, and likely duplicates to offer merging.
-  const recs = (await env.DB.prepare('SELECT id, speakers FROM recordings WHERE owner = ?').bind(owner).all()).results || [];
+  const ac = areaClause(area);
+  const recs = (await env.DB.prepare(`SELECT id, speakers FROM recordings WHERE owner = ?${ac.sql}`).bind(owner, ...ac.binds).all()).results || [];
   const counts = new Map();
   for (const r of recs) {
     for (const name of new Set((safeParse(r.speakers) || []).map((x) => x?.name).filter(Boolean))) {

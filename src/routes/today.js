@@ -2,6 +2,7 @@
 // the one endpoint every prefilled prompt runs through.
 
 import { json, fail } from '../http.js';
+import { areaClause, normalizeArea } from '../areas.js';
 import { defaultModel } from '../config.js';
 import { llmFetch } from '../llm.js';
 import { safeParse } from '../text.js';
@@ -20,17 +21,19 @@ async function liveAcks(env, owner) {
 }
 
 // Ready recordings, newest first, with the JSON columns parsed.
-async function readyRows(env, owner, limit = 200) {
+async function readyRows(env, owner, limit = 200, area = '') {
+  const ac = areaClause(area);
   const rows = (await env.DB.prepare(
     `SELECT id, title, created_at, summary, transcript, action_items, speakers, unanswered
-       FROM recordings WHERE owner = ? AND status = 'ready' ORDER BY created_at DESC LIMIT ${limit}`
-  ).bind(owner).all()).results || [];
+       FROM recordings WHERE owner = ? AND status = 'ready'${ac.sql} ORDER BY created_at DESC LIMIT ${limit}`
+  ).bind(owner, ...ac.binds).all()).results || [];
   // Facts ride along so the model can read a few lines per recording instead of transcript.
   const facts = (await env.DB.prepare(
     'SELECT recording_id, kind, person, text, quote, done FROM facts WHERE owner = ? ORDER BY created_at DESC LIMIT 800'
   ).bind(owner).all()).results || [];
   const byRec = new Map();
-  for (const f of facts) { if (!byRec.has(f.recording_id)) byRec.set(f.recording_id, []); byRec.get(f.recording_id).push(f); }
+  const ids = new Set(rows.map((r) => r.id));
+  for (const f of facts) { if (!ids.has(f.recording_id)) continue; if (!byRec.has(f.recording_id)) byRec.set(f.recording_id, []); byRec.get(f.recording_id).push(f); }
   return rows.map((r) => ({
     ...r,
     facts: byRec.get(r.id) || [],
@@ -40,6 +43,9 @@ async function readyRows(env, owner, limit = 200) {
   }));
 }
 
+// Briefs are cached per area as well as per day/week: the unfiltered one keeps its plain key.
+const periodKey = (period, area) => (normalizeArea(area) ? `${period}|${normalizeArea(area)}` : period);
+
 async function cachedBrief(env, owner, kind, period) {
   const row = await env.DB.prepare('SELECT content, created_at FROM briefs WHERE owner = ? AND kind = ? AND period = ?')
     .bind(owner, kind, period).first();
@@ -48,9 +54,9 @@ async function cachedBrief(env, owner, kind, period) {
 
 // The shared engine: a time window of the owner's recordings + one instruction -> markdown.
 // No recordings in the window means no model call (and nothing to cache).
-export async function runInsight(env, owner, { prompt, person, days, date, me, deep, handled }) {
+export async function runInsight(env, owner, { prompt, person, days, date, me, deep, handled, area }) {
   const since = Date.now() - days * DAY;
-  const rows = await readyRows(env, owner, deep ? 120 : 80);
+  const rows = await readyRows(env, owner, deep ? 120 : 80, area);
   const { text, sources } = buildContext(rows, { since, person, deep, question: prompt });
   if (!sources.length) {
     return { answer: `No finished recordings${person ? ` involving ${person}` : ''} in the last ${days} day${days === 1 ? '' : 's'}.`, sources: [], empty: true };
@@ -80,7 +86,8 @@ function cleanName(v) {
 export async function today(request, env, owner) {
   const date = validDate(new URL(request.url).searchParams.get('date'));
   if (!date) return fail('date=YYYY-MM-DD required');
-  const rows = await readyRows(env, owner);
+  const area = normalizeArea(new URL(request.url).searchParams.get('area'));
+  const rows = await readyRows(env, owner, 200, area);
   const items = openItems(rows, date);
   const newest = rows[0]?.created_at || 0;
   const wk = weekStart(date);
@@ -92,8 +99,9 @@ export async function today(request, env, owner) {
     overdue_count: items.filter((x) => x.overdue).length,
     slipping_count: items.filter((x) => x.slipping).length,
     open: items.slice(0, 60),
-    brief: decorate(await cachedBrief(env, owner, 'today', date)),
-    weekly: decorate(await cachedBrief(env, owner, 'weekly', wk)),
+    area,
+    brief: decorate(await cachedBrief(env, owner, 'today', periodKey(date, area))),
+    weekly: decorate(await cachedBrief(env, owner, 'weekly', periodKey(wk, area))),
     has_recordings: rows.length > 0,
     people,
     acks: await liveAcks(env, owner),
@@ -122,17 +130,18 @@ export async function brief(request, env, owner) {
   const date = validDate(body?.date);
   const kind = body?.kind;
   if (!date || !AUTO_PROMPTS[kind]) return fail('kind (today|weekly) and date required');
-  const period = kind === 'weekly' ? weekStart(date) : date;
+  const area = normalizeArea(body.area);
+  const period = periodKey(kind === 'weekly' ? weekStart(date) : date, area);
   if (!body.force) {
     const hit = await cachedBrief(env, owner, kind, period);
     if (hit) {
-      const newest = (await readyRows(env, owner, 1))[0]?.created_at || 0;
+      const newest = (await readyRows(env, owner, 1, area))[0]?.created_at || 0;
       if (newest <= hit.created_at) return json({ ...hit, stale: false, cached: true });
     }
   }
   let out;
   try {
-    out = await runInsight(env, owner, { ...AUTO_PROMPTS[kind], date, me: cleanName(body.me), handled: await liveAcks(env, owner) });
+    out = await runInsight(env, owner, { ...AUTO_PROMPTS[kind], date, area, me: cleanName(body.me), handled: await liveAcks(env, owner) });
   } catch (e) {
     return fail(String(e?.message || e).slice(0, 300), 502);
   }
@@ -156,7 +165,7 @@ export async function insight(request, env, owner) {
   const days = Math.min(60, Math.max(1, Math.floor(Number(body.days)) || 14));
   try {
     return json(await runInsight(env, owner, {
-      prompt, date, days, person: cleanName(body.person), me: cleanName(body.me), deep: body.deep === true,
+      prompt, date, days, area: normalizeArea(body.area), person: cleanName(body.person), me: cleanName(body.me), deep: body.deep === true,
     }));
   } catch (e) {
     return fail(String(e?.message || e).slice(0, 300), 502);

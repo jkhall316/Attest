@@ -1,6 +1,7 @@
 // Structured memory: save/list/edit facts, and the backfill that builds memory (and the
 // semantic index) for recordings made before these features existed.
 
+import { areaClause } from '../areas.js';
 import { json, fail, uid } from '../http.js';
 import { readRow } from '../db.js';
 import { llmFetch } from '../llm.js';
@@ -94,9 +95,11 @@ export async function listMemory(request, env, owner) {
   const u = new URL(request.url);
   const person = (u.searchParams.get('person') || '').trim().toLowerCase();
   const kind = u.searchParams.get('kind') || '';
+  const ac = areaClause(u.searchParams.get('area'), 'r.area');
   const rows = (await env.DB.prepare(
-    'SELECT id, recording_id, kind, person, text, quote, done, created_at FROM facts WHERE owner = ? ORDER BY created_at DESC LIMIT 1000'
-  ).bind(owner).all()).results || [];
+    `SELECT f.id, f.recording_id, f.kind, f.person, f.text, f.quote, f.done, f.created_at FROM facts f
+       ${ac.sql ? 'JOIN recordings r ON r.id = f.recording_id' : ''} WHERE f.owner = ?${ac.sql} ORDER BY f.created_at DESC LIMIT 1000`
+  ).bind(owner, ...ac.binds).all()).results || [];
   const titles = new Map(((await env.DB.prepare('SELECT id, title FROM recordings WHERE owner = ?').bind(owner).all()).results || [])
     .map((r) => [r.id, r.title]));
   const facts = rows

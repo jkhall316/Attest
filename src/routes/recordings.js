@@ -14,6 +14,7 @@ import { selectVoiceprints, speakerRefsForm, matchedSpeakerRefs, normalizeEmbedd
 import { VOICE_MODEL } from '../config.js';
 import { normalizeFacts } from '../memory.js';
 import { saveFacts, loadFacts } from './memory.js';
+import { AREAS, DEFAULT_AREA, normalizeArea, areaForTemplate, initialArea } from '../areas.js';
 import { indexRecording, deleteRecordingVectors } from '../vectors.js';
 
 /* --- #7 live transcription --- */
@@ -48,10 +49,11 @@ export async function upload(request, env, owner = ownerOf(request)) {
   });
   const templateKey = String(form.get('template') || '');
   const resolvedTemplate = await resolveTemplate(env, owner, templateKey);
+  const { area, area_source } = initialArea(form.get('area'), resolvedTemplate ? templateKey : 'meeting');
   const ins = await env.DB.prepare(
     `INSERT OR IGNORE INTO recordings (id, owner, title, created_at, duration_ms, r2_key, content_type,
-                             status, template, model, transcriber, ingest_id)
-     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?,?)`
+                             status, template, model, transcriber, ingest_id, area, area_source)
+     VALUES (?,?,?,?,?,?,?,'uploaded',?,?,?,?,?,?)`
   ).bind(
     id, owner,
     String(form.get('title') || '').trim() || 'Untitled recording',
@@ -61,7 +63,7 @@ export async function upload(request, env, owner = ownerOf(request)) {
     resolvedTemplate ? templateKey : 'meeting',
     modelById(form.get('model'), env)?.id || null,
     transcriberById(form.get('transcriber'), env).id,
-    ingestId,
+    ingestId, area, area_source,
   ).run();
   if (ins?.meta?.changes === 0) { // two retries raced: keep the first, drop this audio
     await env.AUDIO.delete(key);
@@ -80,10 +82,11 @@ export async function liveStart(request, env, owner) {
   const id = uid();
   const templateKey = String(body.template || '');
   const resolvedTemplate = await resolveTemplate(env, owner, templateKey);
+  const { area, area_source } = initialArea(body.area, resolvedTemplate ? templateKey : 'meeting');
   await env.DB.prepare(
     `INSERT INTO recordings (id, owner, title, created_at, r2_key, content_type,
-                             status, template, model, transcriber, live_transcript, status_at)
-     VALUES (?,?,?,?,?,?,'recording',?,?,?,'',?)`
+                             status, template, model, transcriber, live_transcript, status_at, area, area_source)
+     VALUES (?,?,?,?,?,?,'recording',?,?,?,'',?,?,?)`
   ).bind(
     id, owner,
     String(body.title || '').trim() || 'Untitled recording',
@@ -92,7 +95,7 @@ export async function liveStart(request, env, owner) {
     resolvedTemplate ? templateKey : 'meeting',
     modelById(body.model, env)?.id || null,
     transcriberById(body.transcriber, env).id,
-    Date.now(),
+    Date.now(), area, area_source,
   ).run();
   return json({ id });
 }
@@ -471,6 +474,8 @@ async function summarize(env, rec, id, owner, { transcript, accumulate, tokensIn
   const unanswered = (Array.isArray(sj.unanswered) ? sj.unanswered : [])
     .map((q) => String(q || '').trim()).filter(Boolean).slice(0, 10);
 
+  // The model's read of the content refines the template's guess, unless a person chose the area.
+  const modelArea = normalizeArea(sj.area);
   await env.DB.prepare(
     `UPDATE recordings SET status='ready', summary=?, action_items=?, mindmap=?, mindmaps=?, unanswered=?,
                            tokens_in=coalesce(tokens_in,0)*? + ?, tokens_out=coalesce(tokens_out,0)*? + ?
@@ -480,6 +485,10 @@ async function summarize(env, rec, id, owner, { transcript, accumulate, tokensIn
     sj.mindmaps?.topic || sj.mindmap || '', JSON.stringify(sj.mindmaps || {}), JSON.stringify(unanswered),
     accumulate ? 1 : 0, tokensIn, accumulate ? 1 : 0, tokensOut, id, owner,
   ).run();
+  if (modelArea) {
+    await env.DB.prepare("UPDATE recordings SET area = ? WHERE id = ? AND owner = ? AND area_source = 'auto'")
+      .bind(modelArea, id, owner).run();
+  }
 
   // Memory (facts + semantic index). Best effort: it must never fail a finished summary.
   try {
@@ -489,6 +498,35 @@ async function summarize(env, rec, id, owner, { transcript, accumulate, tokensIn
   } catch (e) {
     console.error('memory update failed:', e?.message || e);
   }
+}
+
+// PATCH /:id/area {area}: a person picks the area. Sticky: automatic passes never change it again.
+// {area: 'auto'} hands it back to the automatic passes.
+export async function setArea(request, env, owner, id) {
+  const body = await request.json().catch(() => null);
+  const rec = await env.DB.prepare('SELECT id, template FROM recordings WHERE id = ? AND owner = ?').bind(id, owner).first();
+  if (!rec) return fail('not found', 404);
+  if (body?.area === 'auto') {
+    const area = areaForTemplate(rec.template) || DEFAULT_AREA;
+    await env.DB.prepare("UPDATE recordings SET area = ?, area_source = 'auto' WHERE id = ? AND owner = ?").bind(area, id, owner).run();
+    return json({ ok: true, area, area_source: 'auto' });
+  }
+  const area = normalizeArea(body?.area);
+  if (!area) return fail(`area must be one of ${AREAS.join(', ')}`);
+  await env.DB.prepare("UPDATE recordings SET area = ?, area_source = 'manual' WHERE id = ? AND owner = ?").bind(area, id, owner).run();
+  return json({ ok: true, area, area_source: 'manual' });
+}
+
+// POST /api/recordings/areas/backfill: recordings made before areas existed all sit in the default
+// area. Re-derive each automatic one from its template group. Manual choices are untouched.
+export async function backfillAreas(env, owner) {
+  const rows = (await env.DB.prepare("SELECT id, template, area FROM recordings WHERE owner = ? AND area_source = 'auto'").bind(owner).all()).results || [];
+  const stmts = rows
+    .map((r) => [r.id, areaForTemplate(r.template)])
+    .filter(([id, a], i) => a && a !== rows[i].area)
+    .map(([id, a]) => env.DB.prepare("UPDATE recordings SET area = ? WHERE id = ? AND owner = ? AND area_source = 'auto'").bind(a, id, owner));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return json({ ok: true, updated: stmts.length });
 }
 
 // PATCH /:id/actions {i, done}: tick or untick one action item. Persisted inside the

@@ -1,6 +1,7 @@
 // Command palette (Cmd/Ctrl+K): jump anywhere, run a prompt, or ask Attest. Typing a question
 // makes "Ask Attest" the first result; the Deep chip is a modifier on that ask.
 
+import { areaQuery } from './scope.js';
 import { $, esc } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -89,7 +90,7 @@ export async function openPalette(preset = '') {
   paint();
   $('palette').showModal();
   $('pal-q').focus();
-  api('/recordings').then(({ recordings }) => { recs = recordings.slice(0, 60); items = commands(); if ($('palette').open) paint(); }).catch(() => {});
+  api('/recordings' + areaQuery()).then(({ recordings }) => { recs = recordings.slice(0, 60); items = commands(); if ($('palette').open) paint(); }).catch(() => {});
 }
 
 export function wirePalette() {

@@ -21,10 +21,11 @@ import { MODELS, TRANSCRIBERS, VOICE_MODEL, isLocal, deprecations, modelsFor, tr
 import { TEMPLATES } from './templates.js';
 import { json, fail, ownerOf } from './http.js';
 import { readRow } from './db.js';
+import { areaClause } from './areas.js';
 import { effectiveStatus, safeParse } from './text.js';
 import {
   upload, process as processRecording, audio, remove, voiceMatch, resummarize, setActionDone, speakerTurns, resetSpeakers, reassign,
-  liveStart, liveChunk, liveAudio, livePart, liveRecover,
+  liveStart, liveChunk, liveAudio, livePart, liveRecover, setArea, backfillAreas,
 } from './routes/recordings.js';
 import { listPeople, createPerson, mergePeople, renamePerson, confirmSpeaker, enrollVoiceprint, deleteVoiceprint, clearVoiceprints, listVoiceprints, voiceprintAudio, putVoiceprintEmbedding } from './routes/people.js';
 import { today, brief, ackBrief, insight } from './routes/today.js';
@@ -100,10 +101,11 @@ export default {
       if (pathname === '/api/settings/extras' && m === 'PUT') return saveExtras(request, env, owner);
 
       if (pathname === '/api/recordings' && m === 'GET') {
+        const ac = areaClause(new URL(request.url).searchParams.get('area'));
         const rows = (await env.DB.prepare(
-          `SELECT id, title, created_at, duration_ms, status, error, template, status_at, speakers
-             FROM recordings WHERE owner = ? ORDER BY created_at DESC LIMIT 200`
-        ).bind(owner).all()).results;
+          `SELECT id, title, created_at, duration_ms, status, error, template, status_at, speakers, area, area_source
+             FROM recordings WHERE owner = ?${ac.sql} ORDER BY created_at DESC LIMIT 200`
+        ).bind(owner, ...ac.binds).all()).results;
         // A live recording that never finalized would otherwise show as 'recording'
         // forever; report it as abandoned instead of leaving a stuck row.
         return json({ recordings: rows.map(({ speakers, ...r }) => ({
@@ -114,6 +116,7 @@ export default {
       }
 
       if (pathname === '/api/recordings' && m === 'POST') return upload(request, env, owner);
+      if (pathname === '/api/recordings/areas/backfill' && m === 'POST') return backfillAreas(env, owner);
 
       /* --- #7 live transcription --- */
       // Collection route (exact pathname), checked ahead of the generic /:id routes
@@ -142,7 +145,7 @@ export default {
       if (pathname.startsWith('/api/templates/') && m === 'DELETE')
         return deleteTemplate(env, owner, pathname.slice('/api/templates/'.length));
 
-      if (pathname === '/api/people' && m === 'GET') return listPeople(env, owner);
+      if (pathname === '/api/people' && m === 'GET') return listPeople(env, owner, new URL(request.url).searchParams.get('area'));
 
       if (pathname === '/api/people' && m === 'POST') return createPerson(request, env, owner);
 
@@ -223,6 +226,9 @@ export default {
       if (rest && rest.endsWith('/resummarize') && m === 'POST')
         return resummarize(env, rest.slice(0, -'/resummarize'.length), owner);
 
+      if (rest && rest.endsWith('/area') && m === 'PATCH')
+        return setArea(request, env, owner, rest.slice(0, -'/area'.length));
+
       if (rest && rest.endsWith('/actions') && m === 'PATCH')
         return setActionDone(request, env, owner, rest.slice(0, -'/actions'.length));
 
@@ -239,16 +245,16 @@ export default {
       if (rest && m === 'DELETE') return remove(env, rest, owner);
 
       if (pathname === '/api/ask' && m === 'POST') {
-        const { question, mode } = await request.json().catch(() => ({}));
+        const { question, mode, area } = await request.json().catch(() => ({}));
         if (!question || typeof question !== 'string') return fail('question required');
         /* --- #3 deep research --- */
-        return json(mode === 'deep' ? await deepResearch(env, owner, question) : await ask(env, owner, question));
+        return json(mode === 'deep' ? await deepResearch(env, owner, question, [], area) : await ask(env, owner, question, area));
         /* --- /#3 deep research --- */
       }
 
       if (pathname === '/api/export' && m === 'GET') {
         const sp = new URL(request.url).searchParams;
-        return exportAll(env, owner, sp.get('id'), sp.get('format') || 'md');
+        return exportAll(env, owner, sp.get('id'), sp.get('format') || 'md', sp.get('area'));
       }
 
       return fail('not found', 404);

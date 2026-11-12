@@ -9,6 +9,7 @@
 // Everything an async callback needs is captured in a per-recording `rec` object, never
 // read back from the shared `state` after an await.
 
+import { getArea } from './scope.js';
 import { $ } from './dom.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -84,7 +85,7 @@ export async function startStop() {
     const { id } = await api('/recordings/live', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        title: $('title').value, template: $('template').value,
+        title: $('title').value, template: $('template').value, area: getArea() || undefined,
         model: $('model').value, transcriber: $('transcriber').value,
       }),
     });
@@ -215,6 +216,7 @@ export async function submit(blob, durationMs) {
   fd.append('template', $('template').value);
   fd.append('model', $('model').value);
   fd.append('transcriber', $('transcriber').value);
+  if (getArea()) fd.append('area', getArea());
   if (durationMs) fd.append('duration_ms', String(durationMs));
   try {
     const { id } = await api('/recordings', { method: 'POST', body: fd });

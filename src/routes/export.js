@@ -5,15 +5,17 @@ import { docx } from '../docx.js';
 import { zip } from '../zip.js';
 import { readRow } from '../db.js';
 import { fail } from '../http.js';
+import { areaClause } from '../areas.js';
 import { listTemplates } from './templates.js';
 import { safeParse, recordingToMarkdown, recordingToHtml, safeFilename } from '../text.js';
 
-export async function exportAll(env, owner, id, format) {
+export async function exportAll(env, owner, id, format, area = '') {
+  const ac = areaClause(area);
   const rows = id
     ? [(await readRow(env, id, owner))].filter(Boolean)
     : (await env.DB.prepare(
-        "SELECT * FROM recordings WHERE owner = ? AND status = 'ready' ORDER BY created_at"
-      ).bind(owner).all()).results.map((r) => ({ ...r, action_items: safeParse(r.action_items) }));
+        `SELECT * FROM recordings WHERE owner = ? AND status = 'ready'${ac.sql} ORDER BY created_at`
+      ).bind(owner, ...ac.binds).all()).results.map((r) => ({ ...r, action_items: safeParse(r.action_items) }));
   if (!rows.length) return fail('nothing to export', 404);
   // html and docx are single-document formats; without an id they used to silently
   // return only the oldest recording.
