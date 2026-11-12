@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Attest's own near-black, so nothing flashes white before the page paints. -->
+    <color name="attest_bg">#09090B</color>
+
+    <style name="Theme.Attest" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/attest_bg</item>
+        <item name="android:colorBackground">@color/attest_bg</item>
+        <item name="android:colorAccent">#6366F1</item>
+        <item name="android:statusBarColor">@color/attest_bg</item>
+        <item name="android:navigationBarColor">@color/attest_bg</item>
+    </style>
+
+    <!-- Transparent rather than windowNoDisplay: the share copies files on a thread and finishes after onResume. -->
+    <style name="Theme.Attest.Invisible" parent="android:Theme.Translucent.NoTitleBar" />
+</resources>

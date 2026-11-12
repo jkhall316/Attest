@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Attest</string>
+    <string name="share_label">Upload to Attest</string>
+    <string name="shortcut_server">Server and sign-in</string>
+</resources>
