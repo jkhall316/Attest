@@ -191,7 +191,7 @@ export const AUTO_PROMPTS = {
     prompt: [
       'Write my brief for today, as a chief of staff would hand it to me on my way into the day.',
       'Use exactly these markdown sections, in this order, and leave out any section with nothing real in it:',
-      '## Do first: the three things that matter most today, each with why it is urgent now (a deadline, someone waiting, something blocked on it).',
+      '## Do first: ALWAYS write this section whenever I have any open commitments. The three that matter most today, chosen from the overdue, due-today, slipping and open lists (an item with no date can still be the most important), each with why it is urgent now: a deadline, someone waiting, something blocked on it.',
       '## Due and overdue: dated commitments, soonest first, with the date and who is waiting.',
       '## Waiting on others: what other people owe me, who, since when, and a one-line nudge I could send.',
       '## Decide today: questions or decisions that are stuck, with the options raised in the recordings.',
@@ -209,7 +209,7 @@ export const AUTO_PROMPTS = {
       'Use exactly these markdown sections, in this order, and leave out any section with nothing real in it:',
       '## The week in one line: one sentence on what this week was really about.',
       '## Decisions made: each decision, who made it, and why, one line each.',
-      '## Still open: commitments carried into next week, oldest or most overdue first, with who owns each.',
+      '## Still open: ALWAYS write this section whenever there are open commitments: those carried into next week, oldest or most overdue first, with who owns each.',
       '## Unresolved questions: questions asked that never got a clear answer.',
       '## People: who I spent the week with and anyone I owe a follow-up.',
       '## Focus next week: the one thing to focus on and the two that come after it, each with the reason.',
