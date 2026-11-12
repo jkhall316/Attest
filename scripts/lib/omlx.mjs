@@ -1,11 +1,12 @@
-// Talking to a local OpenAI-compatible server (oMLX, or anything like it) for `npm run
-// setup:local` and `npm run local:check`. Plain functions with an injectable fetch, so the
-// tests can aim them at a mock server.
+// Talking to a local OpenAI-compatible server (oMLX on a Mac; LM Studio, Ollama, or anything
+// like them elsewhere) for `npm run setup:local` and `npm run local:check`. Plain functions with
+// an injectable fetch, so the tests can aim them at a mock server.
 
 import { parseJsonLoose } from '../../src/text.js';
 import { encodeWav } from '../../src/voiceprints.js';
+import { defaultPorts } from './platform.mjs';
 
-export const DEFAULT_PORTS = [8000, 11434, 11436];
+export const DEFAULT_PORTS = defaultPorts();
 
 export function normalizeBase(url) {
   let u = String(url || '').trim().replace(/\/+$/, '');
@@ -169,29 +170,62 @@ export const RECOMMENDED = {
 };
 export const SUGGESTED_MODELS = { chat: RECOMMENDED.chat.id, stt: RECOMMENDED.stt.id, embedding: RECOMMENDED.embedding.id };
 
+// Windows and Linux: no oMLX (it is Apple Silicon only). Chat and embeddings come from LM Studio
+// or Ollama (GGUF builds of the same models), and transcription from a separate Whisper server,
+// because neither of those serves /v1/audio/transcriptions. The ids are LM Studio's; `match`
+// also finds Ollama's names (gpt-oss:20b, qwen3-embedding:0.6b).
+export const RECOMMENDED_PC = {
+  chat: {
+    id: 'openai/gpt-oss-20b', match: /gpt-oss[-:_]?20b/i, size: 'about 13 GB',
+    what: 'Writes the summaries, mind maps, answers and memory',
+    note: 'In Ollama: gpt-oss:20b. Wants a GPU with 16 GB or more (or plenty of system RAM, slowly). Load it with a long context (32k tokens or more); in Ollama set OLLAMA_CONTEXT_LENGTH, because the OpenAI-style API cannot raise it per request',
+  },
+  stt: {
+    id: 'deepdml/faster-whisper-large-v3-turbo-ct2', match: /whisper.*large-v3|large-v3.*whisper/i, size: 'about 1.6 GB',
+    what: 'Turns audio into text with timestamps (Attest uses the timestamps to tell speakers apart)',
+    note: 'Served by a separate Whisper server: Speaches (faster-whisper, OpenAI-compatible), or whisper.cpp\'s whisper-server with --inference-path /v1/audio/transcriptions and --convert (needs ffmpeg). LM Studio and Ollama cannot transcribe. On an RTX 5090 under Speaches it ran about 19x realtime, five times faster than Systran/faster-whisper-large-v3 with the same timestamps',
+  },
+  embedding: {
+    id: 'text-embedding-qwen3-embedding-0.6b', match: /qwen3-embedding[-:_]?0\.6b/i, size: 'under 1 GB',
+    what: 'Lets Ask search by meaning instead of exact words (optional)',
+    note: 'In Ollama: qwen3-embedding:0.6b. nomic-embed-text also works',
+  },
+};
+
+// The recommendations for the machine setup runs on. Everything here defaults to the Mac set,
+// so callers that pass no platform behave exactly as before.
+export const recommendedFor = (platform = 'darwin') => (platform === 'darwin' ? RECOMMENDED : RECOMMENDED_PC);
+export const suggestedModels = (platform = 'darwin') => {
+  const r = recommendedFor(platform);
+  return { chat: r.chat.id, stt: r.stt.id, embedding: r.embedding.id };
+};
+
 // Shown before anything else, so the models can be downloaded first.
-export function recommendationsText() {
+export function recommendationsText(platform = 'darwin') {
+  const rec = recommendedFor(platform);
   const row = (label, r) => `  ${label.padEnd(14)} ${r.id}\n  ${' '.repeat(14)} ${r.size}. ${r.what}.${r.note ? `\n  ${' '.repeat(14)} ${r.note}.` : ''}`;
   return [
-    'Download these in oMLX first (admin page, Models, search Hugging Face):',
+    platform === 'darwin'
+      ? 'Download these in oMLX first (admin page, Models, search Hugging Face):'
+      : 'Download these first: chat and embeddings in LM Studio or Ollama, transcription in your Whisper server:',
     '',
-    row('Chat', RECOMMENDED.chat),
-    row('Transcription', RECOMMENDED.stt),
-    row('Embeddings', RECOMMENDED.embedding),
+    row('Chat', rec.chat),
+    row('Transcription', rec.stt),
+    row('Embeddings', rec.embedding),
     '',
     'Chat is required. Transcription is needed to transcribe audio. Embeddings are optional.',
   ].join('\n');
 }
 
 // 1-based position of the recommended model for a role in `ids`, or 0 when it is not installed.
-export function recommendedIndex(ids, role) {
-  const r = RECOMMENDED[role];
+export function recommendedIndex(ids, role, platform = 'darwin') {
+  const r = recommendedFor(platform)[role];
   const i = r ? ids.findIndex((id) => r.match.test(id)) : -1;
   return i + 1;
 }
 
 // Roles whose recommended model is not among `ids`.
-export const missingRecommended = (ids) => Object.keys(RECOMMENDED).filter((role) => !recommendedIndex(ids, role));
+export const missingRecommended = (ids, platform = 'darwin') => Object.keys(recommendedFor(platform)).filter((role) => !recommendedIndex(ids, role, platform));
 
 // The files oMLX's Whisper loader wants beside the weights. The MLX-only conversions omit them.
 export const WHISPER_PROCESSOR_FILES = [

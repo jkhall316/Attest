@@ -14,6 +14,11 @@ export async function confirm(question, def = true) {
 }
 
 export function secret(question) {
+  // No raw mode when stdin is not a terminal (piped input, or Git Bash's mintty on Windows
+  // without winpty): typing cannot be hidden there, so ask visibly rather than crash.
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    return ask(`${question} (VISIBLE: this terminal cannot hide typing; Enter to skip)`);
+  }
   return new Promise((resolve) => {
     process.stdout.write(question + ' (hidden, Enter to skip): ');
     const stdin = process.stdin;

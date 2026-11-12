@@ -6,10 +6,10 @@
 // (prepended to wrangler.toml at deploy time), secrets go to Cloudflare with
 // `wrangler secret put`, and the API token is used once in memory and discarded.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { ask, confirm, secret } from './lib/prompt.mjs';
 import { OPENROUTER_CHAT, OPENROUTER_STT, OPENROUTER_URL } from '../src/config.js';
 import { setupAccess } from './lib/access.mjs';
+import { npx, machineLabel } from './lib/platform.mjs';
 import { DEFAULT_VECTOR_INDEX, localOverrides, overrideLines, mergeConfig } from './lib/merge.mjs';
 
 const LOCAL = 'wrangler.local.toml';
@@ -18,7 +18,7 @@ const forceWizard = process.argv.includes('--setup');
 const passthrough = process.argv.slice(2).filter((a) => a !== '--setup');
 const interactive = process.stdin.isTTY && process.stdout.isTTY;
 
-const wrangler = (args, opts = {}) => spawnSync('npx', ['wrangler', ...args], { stdio: 'inherit', ...opts });
+const wrangler = (args, opts = {}) => npx(['wrangler', ...args], { stdio: 'inherit', ...opts });
 const existingHost = () => existsSync(LOCAL) ? (readFileSync(LOCAL, 'utf8').match(/pattern\s*=\s*"([^"]+)"/) || [])[1] : '';
 const hostOk = (h) => /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(h);
 const emailOk = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
@@ -46,7 +46,7 @@ async function wizard() {
   // Where should Attest run? The rest of this wizard is the Cloudflare path.
   console.log('\nWhere should Attest run?');
   console.log('  1. Cloudflare + a hosted AI provider (OpenRouter or OpenAI). Reachable from anywhere. Recommended.');
-  console.log('  2. This Mac only, with a local model server such as oMLX. Nothing leaves your machine; no API fees.');
+  console.log(`  2. ${machineLabel().replace(/^t/, 'T')} only, with a local model server (oMLX on a Mac; LM Studio or Ollama on Windows/Linux). Nothing leaves your machine; no API fees.`);
   console.log('     (No Cloudflare account needed. Speaker detection and search work, with some trade-offs: see the README.)');
   if ((await ask('Choose 1 or 2', { def: '1' })).trim() === '2') {
     const { setupLocal } = await import('./local-setup.mjs');
@@ -90,7 +90,7 @@ the automatic login setup, complete Zero Trust onboarding (Free plan). See the R
 
   let access = null;
   if (await confirm('Create the Cloudflare Access login automatically? (needs an API token, see README)')) {
-    const acct = (spawnSync('npx', ['wrangler', 'whoami'], { encoding: 'utf8' }).stdout || '').match(/\b[0-9a-f]{32}\b/g) || [];
+    const acct = (npx(['wrangler', 'whoami'], { encoding: 'utf8' }).stdout || '').match(/\b[0-9a-f]{32}\b/g) || [];
     const accountId = await ask('Cloudflare account id', { def: [...new Set(acct)].length === 1 ? acct[0] : '' });
     const token = await secret('Cloudflare API token');
     if (accountId && token) access = { accountId, token };
@@ -109,7 +109,7 @@ the automatic login setup, complete Zero Trust onboarding (Free plan). See the R
 const vectorIndex = () => localOverrides(existsSync(LOCAL) ? readFileSync(LOCAL, 'utf8') : '').vectorIndex || DEFAULT_VECTOR_INDEX;
 function ensureVectorize() {
   if (process.env.ATTEST_NO_VECTORS) return false;
-  const r = spawnSync('npx', ['wrangler', 'vectorize', 'create', vectorIndex(), '--dimensions=768', '--metric=cosine'], { encoding: 'utf8' });
+  const r = npx(['wrangler', 'vectorize', 'create', vectorIndex(), '--dimensions=768', '--metric=cosine'], { encoding: 'utf8' });
   const out = `${r.stdout || ''}${r.stderr || ''}`;
   if (r.status === 0 || /already exists|duplicate/i.test(out)) return true;
   console.log('! Could not create the Vectorize index; deploying without semantic search (keyword search still works).');

@@ -1,16 +1,23 @@
 // `npm run setup:local` (also offered by `npm run setup`): configure Attest to run entirely on
-// this Mac against a local OpenAI-compatible server such as oMLX. Detects the server, lists
-// its models, proposes roles, tests each capability, and writes .dev.vars.
+// this machine against a local OpenAI-compatible server (oMLX on a Mac; LM Studio or Ollama on
+// Windows and Linux). Detects the server, lists its models, proposes roles, tests each
+// capability, and writes .dev.vars.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ask, confirm, secret } from './lib/prompt.mjs';
 import {
-  detectBase, normalizeBase, listModels, guessRole, probeChat, probeEmbeddings, probeStt, mergeDevVars, buildLocalVars, SUGGESTED_MODELS,
-  RECOMMENDED, recommendationsText, recommendedIndex, missingRecommended, explainSttError,
+  detectBase, normalizeBase, listModels, guessRole, probeChat, probeEmbeddings, probeStt, mergeDevVars, buildLocalVars,
+  recommendedFor, suggestedModels, recommendationsText, recommendedIndex, missingRecommended, explainSttError,
 } from './lib/omlx.mjs';
+import { isMain, machineLabel, defaultPorts } from './lib/platform.mjs';
+
+const PLATFORM = process.platform;
+const MAC = PLATFORM === 'darwin';
+const RECOMMENDED = recommendedFor(PLATFORM);
+const SUGGESTED_MODELS = suggestedModels(PLATFORM);
 
 // `role` marks the recommended model in the list and makes it the default when it is installed.
 const pickFrom = async (title, ids, { role, optional, guessed = true } = {}) => {
-  const rec = role ? recommendedIndex(ids, role) : 0;
+  const rec = role ? recommendedIndex(ids, role, PLATFORM) : 0;
   console.log(`\n${title}`);
   ids.forEach((id, i) => console.log(`  ${i + 1}. ${id}${guessRole(id) === 'other' ? '  (not for this)' : ''}${i + 1 === rec ? '   <- recommended' : ''}`));
   if (optional) console.log('  0. none');
@@ -27,11 +34,12 @@ const pickFrom = async (title, ids, { role, optional, guessed = true } = {}) => 
 
 export async function setupLocal() {
   console.log(`
-Local setup: run Attest entirely on this Mac, nothing leaving it.
-You need a local server with an OpenAI-compatible API running, such as oMLX
-(https://github.com/jundot/omlx).
+Local setup: run Attest entirely on ${machineLabel(PLATFORM)}, nothing leaving it.
+${MAC
+    ? 'You need a local server with an OpenAI-compatible API running, such as oMLX\n(https://github.com/jundot/omlx).'
+    : 'You need a local server with an OpenAI-compatible API running for chat, such as LM Studio\n(https://lmstudio.ai, start its server) or Ollama (https://ollama.com). To transcribe audio\nyou also need a Whisper server, such as Speaches (https://speaches.ai) or whisper.cpp\'s\nwhisper-server. The README section "Run it locally on Windows or Linux" has the commands.'}
 
-${recommendationsText()}
+${recommendationsText(PLATFORM)}
 `);
   if (!(await confirm('Have the models you want downloaded, and the server running?', true))) {
     console.log('\nNo problem. Download them, then run `npm run setup:local` again.');
@@ -41,7 +49,7 @@ ${recommendationsText()}
   if (detected) console.log(`Found a server answering at ${detected}`);
   let base = '', key = '', models;
   for (;;) {
-    base = normalizeBase(await ask('Server address', { def: detected || 'http://localhost:8000/v1' }));
+    base = normalizeBase(await ask('Server address', { def: detected || `http://localhost:${defaultPorts(PLATFORM)[0]}/v1` }));
     key = await secret('API key for that server');
     models = await listModels(base, key);
     if (models.ok) break;
@@ -51,7 +59,8 @@ ${recommendationsText()}
   console.log(`\nConnected. ${models.ids.length} model(s) available.`);
   const ids = models.ids;
   const by = (role) => ids.filter((m) => guessRole(m) === role);
-  const missing = missingRecommended(ids);
+  // Off the Mac, transcription lives on a separate Whisper server, so its absence here is expected.
+  const missing = missingRecommended(ids, PLATFORM).filter((role) => MAC || role !== 'stt');
   if (missing.length) {
     console.log('\nNot installed on that server yet:');
     for (const role of missing) console.log(`  ${role === 'stt' ? 'transcription' : role}: ${RECOMMENDED[role].id}`);
@@ -66,9 +75,11 @@ ${recommendationsText()}
   if (sttIds.length) stt = await pickFrom('Transcription model (Whisper-style). Optional, but needed to transcribe audio.', sttIds, { role: 'stt', optional: true });
   else {
     console.log('\nNo transcription model found on that server.');
-    console.log(`Without one you cannot transcribe audio. Download ${SUGGESTED_MODELS.stt} in oMLX, or point Attest at another server that has /v1/audio/transcriptions.`);
-    if (await confirm('Use a different server for transcription?', false)) {
-      sttBase = normalizeBase(await ask('Transcription server address', { def: base }));
+    console.log(MAC
+      ? `Without one you cannot transcribe audio. Download ${SUGGESTED_MODELS.stt} in oMLX, or point Attest at another server that has /v1/audio/transcriptions.`
+      : 'That is normal for LM Studio and Ollama. To transcribe audio, point Attest at a Whisper server with /v1/audio/transcriptions\n(Speaches listens on port 8000 by default; whisper.cpp\'s whisper-server on 8080).');
+    if (await confirm('Use a different server for transcription?', !MAC)) {
+      sttBase = normalizeBase(await ask('Transcription server address', { def: MAC ? base : 'http://localhost:8000/v1' }));
       sttKey = await secret('API key for it');
       stt = await ask('Transcription model id', { def: SUGGESTED_MODELS.stt });
     }
@@ -96,4 +107,4 @@ ${stt && timestamps ? '\nSpeaker labels: your transcriber does not label speaker
   return true;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) setupLocal().then((ok) => process.exit(ok ? 0 : 1));
+if (isMain(import.meta.url)) setupLocal().then((ok) => process.exit(ok ? 0 : 1));
